@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#10261d">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Blokes Golf">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Blokes Mini Golf</title>
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" href="icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="icon.svg">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="game-card" aria-label="Blokes Mini Golf game">
+        <div class="embed-launch-overlay" aria-label="Open Blokes Mini Golf">
+          <div class="embed-launch-panel">
+            <p>Industrious Blokes After Hours</p>
+            <h2>Blokes Mini Golf</h2>
+            <a href="./index.html" target="_blank" rel="noopener">Play Full Screen</a>
+            <span>Best on mobile after opening the full game.</span>
+          </div>
+        </div>
+
+        <div id="start-menu" class="start-menu">
+          <div class="menu-panel">
+            <p class="eyebrow">Blokes Mini Golf</p>
+            <h2>Choose Your Damage</h2>
+            <div class="quick-rules">
+              <strong>Quick play</strong>
+              <span>Tap where you want to aim. Start in the swing zone. Pull down fast and release. Crooked pulls bend the ball.</span>
+            </div>
+            <div id="offline-status" class="offline-status">Offline mode loads after first install/open.</div>
+            <div class="menu-tabs" role="tablist" aria-label="Main menu">
+              <button id="play-tab" class="menu-tab active" type="button" data-menu-tab="play">Play</button>
+              <button id="records-tab" class="menu-tab" type="button" data-menu-tab="records">Records</button>
+            </div>
+            <div id="play-panel" class="menu-page active">
+              <div class="mode-row" role="group" aria-label="Game mode">
+                <button id="mode-one" class="mode-button active" type="button" data-mode="1">1 Player</button>
+                <button id="mode-two" class="mode-button" type="button" data-mode="2">2 Players</button>
+              </div>
+              <div class="menu-fields">
+                <label>
+                  <span>Player 1</span>
+                  <input id="player-one-name" type="text" maxlength="14" value="Bloke 1">
+                </label>
+                <fieldset class="ball-picker" aria-label="Player 1 ball color">
+                  <legend>Player 1 Ball</legend>
+                  <div class="swatch-row">
+                    <button class="ball-swatch active" type="button" data-player="1" data-color="#fff4d1" aria-label="Cream ball" style="--ball-color:#fff4d1"></button>
+                    <button class="ball-swatch" type="button" data-player="1" data-color="#f2c14e" aria-label="Gold ball" style="--ball-color:#f2c14e"></button>
+                    <button class="ball-swatch" type="button" data-player="1" data-color="#ef6f4e" aria-label="Coral ball" style="--ball-color:#ef6f4e"></button>
+                    <button class="ball-swatch" type="button" data-player="1" data-color="#66a6ff" aria-label="Blue ball" style="--ball-color:#66a6ff"></button>
+                  </div>
+                </fieldset>
+                <label id="player-two-field">
+                  <span>Player 2</span>
+                  <input id="player-two-name" type="text" maxlength="14" value="Bloke 2">
+                </label>
+                <fieldset id="player-two-ball-field" class="ball-picker">
+                  <legend>Player 2 Ball</legend>
+                  <div class="swatch-row">
+                    <button class="ball-swatch" type="button" data-player="2" data-color="#fff4d1" aria-label="Cream ball" style="--ball-color:#fff4d1"></button>
+                    <button class="ball-swatch active" type="button" data-player="2" data-color="#f2c14e" aria-label="Gold ball" style="--ball-color:#f2c14e"></button>
+                    <button class="ball-swatch" type="button" data-player="2" data-color="#ef6f4e" aria-label="Coral ball" style="--ball-color:#ef6f4e"></button>
+                    <button class="ball-swatch" type="button" data-player="2" data-color="#66a6ff" aria-label="Blue ball" style="--ball-color:#66a6ff"></button>
+                  </div>
+                </fieldset>
+                <label>
+                  <span>Course</span>
+                  <select id="course-select">
+                    <option value="0">The Tipsy Kangaroo</option>
+                    <option value="1">Bogey After Dark</option>
+                    <option value="2">The Rusty Shaft</option>
+                    <option value="3">Mulligan's Hangover</option>
+                  </select>
+                </label>
+              </div>
+              <button id="start-match" class="start-button" type="button">Start Round</button>
+            </div>
+            <div id="records-panel" class="menu-page">
+              <div id="menu-records" class="menu-records" aria-live="polite"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="topbar">
+          <div class="brand-lockup">
+            <p class="eyebrow">Industrious Blokes After Hours</p>
+            <h1>Blokes Mini Golf</h1>
+            <p class="banner-copy">Questionable swings. Respectable scorecards.</p>
+          </div>
+          <div class="scorebox" aria-live="polite">
+            <span>Points</span>
+            <strong id="score">0</strong>
+            <em id="best">Best 0</em>
+          </div>
+        </div>
+
+        <div class="hud">
+          <div class="hud-chip">
+            <span>Player</span>
+            <strong id="active-player">Bloke 1</strong>
+            <small id="player-scoreline">Round 0</small>
+          </div>
+          <div class="hud-chip">
+            <span>Strokes</span>
+            <strong id="strokes">0</strong>
+            <small>Round total</small>
+          </div>
+          <div class="hud-chip">
+            <span>Par</span>
+            <strong id="par">3</strong>
+            <small>Gentle lie</small>
+          </div>
+          <div class="hud-chip">
+            <span>Streak</span>
+            <strong id="streak">x1</strong>
+            <small>Confidence issue</small>
+          </div>
+          <div class="hud-chip">
+            <span>Beer Money</span>
+            <strong id="bucks">$0</strong>
+            <small>Imaginary winnings</small>
+          </div>
+          <button id="sound-toggle" class="sound-toggle sound-on" type="button" aria-pressed="true">
+            <span class="toggle-knob"></span>
+            <span id="sound-label">Sound On</span>
+          </button>
+          <button id="fullscreen-toggle" type="button">Fullscreen</button>
+          <a id="open-full-game" class="open-full-game" href="./index.html" target="_blank" rel="noopener">Open Full Game</a>
+          <button id="restart" type="button">New Round</button>
+        </div>
+
+        <div class="matchbar" aria-live="polite">
+          <div id="player-one-card" class="player-card active">
+            <span>Bloke 1</span>
+            <strong>0</strong>
+          </div>
+          <div class="hole-pill">Hole <span id="match-hole">1</span> / Par <span id="match-par">3</span></div>
+          <div id="player-two-card" class="player-card">
+            <span>Bloke 2</span>
+            <strong>0</strong>
+          </div>
+        </div>
+
+        <div class="leaderboard">
+          <div>
+            <span id="course-name">The Tipsy Kangaroo</span>
+            <strong>Leaderboard</strong>
+          </div>
+          <ol id="leaderboard-list">
+            <li>No scores yet. Be the first problem.</li>
+          </ol>
+        </div>
+
+        <div class="course-wrap">
+          <canvas id="game" width="960" height="620" aria-label="Tap an aim point, then pull down in the swing zone and release to shoot"></canvas>
+          <div id="toast" class="toast">Drag it back, let it rip, blame the club.</div>
+          <div id="bloke-popup" class="bloke-popup mood-talk" aria-live="polite">
+            <div class="bloke-bubble" id="bloke-line">Read the break, then lie about it.</div>
+            <div class="bloke-character" aria-hidden="true">
+              <div class="bloke-head">
+                <span class="bloke-cap"></span>
+                <span class="bloke-eye left"></span>
+                <span class="bloke-eye right"></span>
+                <span class="bloke-moustache"></span>
+              </div>
+              <div class="bloke-body"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="controls">
+          <div class="club-row" role="group" aria-label="Club selection">
+            <button class="club active" type="button" data-club="putter">Tiny Tapper</button>
+            <button class="club" type="button" data-club="wedge">Rusty Flirt</button>
+            <button class="club" type="button" data-club="driver">Send Daddy</button>
+          </div>
+          <div id="wedge-shot-toggle" class="shot-toggle" role="group" aria-label="Rusty Flirt shot type">
+            <button class="shot-mode active" type="button" data-shot="flop">Flop</button>
+            <button class="shot-mode" type="button" data-shot="chip">Chip</button>
+          </div>
+          <div class="meter" aria-label="Shot power">
+            <span id="club-label">Putter</span>
+            <div class="meter-track">
+              <div id="power-bar"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script src="game.js"></script>
+    <script>
+      if ("serviceWorker" in navigator && location.protocol !== "file:") {
+        navigator.serviceWorker.register("./sw.js");
+      }
+    </script>
+  </body>
+</html>
