@@ -1,0 +1,19 @@
+{
+  "name": "Blokes Mini Golf",
+  "short_name": "Blokes Golf",
+  "description": "A questionable little mini golf game from Industrious Blokes.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#10261d",
+  "theme_color": "#10261d",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
