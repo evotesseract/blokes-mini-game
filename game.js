@@ -5,7 +5,10 @@ window.addEventListener("error", (event) => {
   const message = event.message || "Game script error";
   console.error(event.error || message);
   const toast = document.getElementById("toast");
-  if (toast) toast.textContent = `Game error: ${message}`;
+  if (toast) {
+    toast.textContent = `Game error: ${message}`;
+    toast.classList.add("show");
+  }
 });
 
 const startMenu = document.getElementById("start-menu");
@@ -1438,7 +1441,10 @@ function blokeSay(text, mood = "talk", ttl = 220) {
 }
 
 function setMessage(text, ttl = 180, mood = "talk") {
-  setText(toastEl, text);
+  if (toastEl) {
+    setText(toastEl, "");
+    toastEl.classList.remove("show");
+  }
   messageTimer = Math.min(ttl, 150);
   blokeSay(text, mood, Math.min(ttl, 170));
   const speechStyle = {
@@ -1461,8 +1467,12 @@ function setMessage(text, ttl = 180, mood = "talk") {
 }
 
 function setToastOnly(text, ttl = 120) {
-  setText(toastEl, text);
+  if (toastEl) {
+    setText(toastEl, "");
+    toastEl.classList.remove("show");
+  }
   messageTimer = ttl;
+  blokeSay(text, "course", Math.min(ttl, 120));
 }
 
 function updateSoundButton() {
@@ -2241,23 +2251,29 @@ function exitFullscreen() {
   return Promise.resolve();
 }
 
-function enterFullscreenOrExpand(message = "Fullscreen blocked, so we stretched it here instead.") {
+function expandInPage(message = "Phone mode engaged.") {
+  if (!gameCard) return false;
+  gameCard.classList.add("app-fullscreen");
+  document.body.classList.add("game-expanded");
+  updateFullscreenButton();
+  setMessage(message, 140, "course");
+  return false;
+}
+
+function enterFullscreenOrExpand(message = "Fullscreen blocked, so we stretched it here instead.", options = {}) {
   if (!gameCard) return Promise.resolve(false);
   if (isFullscreen() || isExpanded()) {
     updateFullscreenButton();
     return Promise.resolve(true);
   }
+  if (options.forceExpand) return Promise.resolve(expandInPage(message));
   return requestFullscreen(gameCard)
     .then(() => {
       updateFullscreenButton();
       return true;
     })
     .catch(() => {
-      gameCard.classList.add("app-fullscreen");
-      document.body.classList.add("game-expanded");
-      updateFullscreenButton();
-      setMessage(message, 180);
-      return false;
+      return expandInPage(message);
     });
 }
 
@@ -3265,7 +3281,10 @@ function safeDraw(drawFn) {
   } catch (error) {
     console.error(error);
     const toast = document.getElementById("toast");
-    if (toast) toast.textContent = `Draw error: ${error.message || error}`;
+    if (toast) {
+      toast.textContent = `Draw error: ${error.message || error}`;
+      toast.classList.add("show");
+    }
     try {
       ctx.restore();
     } catch {
