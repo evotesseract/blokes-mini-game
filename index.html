@@ -47,6 +47,7 @@
             <div id="offline-status" class="offline-status">Offline mode loads after first install/open.</div>
             <div class="menu-tabs" role="tablist" aria-label="Main menu">
               <button id="play-tab" class="menu-tab active" type="button" data-menu-tab="play">Play</button>
+              <button id="tutorial-tab" class="menu-tab" type="button" data-menu-tab="tutorial">Tutorial</button>
               <button id="records-tab" class="menu-tab" type="button" data-menu-tab="records">Records</button>
             </div>
             <div id="play-panel" class="menu-page active">
@@ -92,6 +93,73 @@
                 </label>
               </div>
               <button id="start-match" class="start-button" type="button">Start Round</button>
+            </div>
+            <div id="tutorial-panel" class="menu-page">
+              <h3 class="tutorial-title">Tutorial</h3>
+              <div class="tutorial-grid" aria-label="How to play Blokes Mini Golf">
+                <article class="tutorial-card tutorial-swing">
+                  <div class="tutorial-visual">
+                    <span class="aim-dot"></span>
+                    <span class="pull-lane"></span>
+                    <span class="power-tier green"></span>
+                    <span class="power-tier yellow"></span>
+                    <span class="power-tier red"></span>
+                    <span class="ghost-hand"></span>
+                  </div>
+                  <h3>Aim, Pull, Flick</h3>
+                  <p>Tap your landing spot. Start in the swing zone. Pull down and release quick for the spicy stuff.</p>
+                </article>
+                <article class="tutorial-card tutorial-line">
+                  <div class="tutorial-visual">
+                    <span class="mini-ball"></span>
+                    <span class="power-beads"></span>
+                    <span class="miss-beads"></span>
+                    <span class="tiny-cup"></span>
+                  </div>
+                  <h3>Line Is Power</h3>
+                  <p>The dots show how hard you are pulling, not the final path. Break, rough, and bad contact still get a vote.</p>
+                </article>
+                <article class="tutorial-card tutorial-break">
+                  <div class="tutorial-visual">
+                    <span class="break-zone soft"></span>
+                    <span class="break-zone mean"></span>
+                    <span class="safe-pill">SAFE</span>
+                    <span class="break-arrow a1"></span>
+                    <span class="break-arrow a2"></span>
+                  </div>
+                  <h3>Read The Break</h3>
+                  <p>Green is gentle, red is rude. Safe zones calm the ball down and set up the next shot.</p>
+                </article>
+                <article class="tutorial-card tutorial-hazards">
+                  <div class="tutorial-visual">
+                    <span class="sand-patch"></span>
+                    <span class="water-patch"></span>
+                    <span class="rough-patch"></span>
+                    <span class="wedge-icon"></span>
+                  </div>
+                  <h3>Pick The Club</h3>
+                  <p>Driver needs a real flick. Rusty Flirt saves sand and short attacks. Tiny Tapper belongs on the green.</p>
+                </article>
+                <article class="tutorial-card tutorial-green">
+                  <div class="tutorial-visual">
+                    <span class="green-shape"></span>
+                    <span class="true-line-mini">TRUE LINE</span>
+                    <span class="flag-mini">7</span>
+                    <span class="cup-mini"></span>
+                  </div>
+                  <h3>Find The True Line</h3>
+                  <p>The pale lane into the cup has almost no break. Earn that angle and you can hole out.</p>
+                </article>
+                <article class="tutorial-card tutorial-score">
+                  <div class="tutorial-visual">
+                    <span class="score-pop">+8</span>
+                    <span class="score-pop two">SAFE</span>
+                    <span class="score-pop three">ON LINE</span>
+                  </div>
+                  <h3>Score With Style</h3>
+                  <p>Leaderboard uses total strokes. Bonus points reward clean shots, smart layups, and not embarrassing yourself.</p>
+                </article>
+              </div>
             </div>
             <div id="records-panel" class="menu-page">
               <div id="menu-records" class="menu-records" aria-live="polite"></div>
@@ -176,13 +244,17 @@
           <div id="bloke-popup" class="bloke-popup mood-talk" aria-live="polite">
             <div class="bloke-bubble" id="bloke-line">Read the break, then lie about it.</div>
             <div class="bloke-character" aria-hidden="true">
+              <div class="club-antenna"></div>
               <div class="bloke-head">
-                <span class="bloke-cap"></span>
                 <span class="bloke-eye left"></span>
                 <span class="bloke-eye right"></span>
-                <span class="bloke-moustache"></span>
+                <span class="robot-mouth"></span>
               </div>
               <div class="bloke-body"></div>
+              <span class="club-arm left"></span>
+              <span class="club-arm right"></span>
+              <span class="club-foot left"></span>
+              <span class="club-foot right"></span>
             </div>
           </div>
         </div>

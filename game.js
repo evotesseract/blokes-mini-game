@@ -56,8 +56,6 @@ const soundLabel = document.getElementById("sound-label");
 const fullscreenToggle = document.getElementById("fullscreen-toggle");
 const gameCard = document.querySelector(".game-card");
 
-document.body.classList.add("quiet-commentary");
-
 const W = canvas.width;
 const H = canvas.height;
 
@@ -396,8 +394,8 @@ const obRoasts = [
 ];
 
 const mechanicTipLines = [
-  "Beginner tip, babe: the Break bar reads where your ball is sitting. Safe means calm, nasty means aim like you have consequences.",
-  "That Break meter changes by zone. Green is polite, red is nasty, and nasty absolutely will drag your ball sideways.",
+  "Beginner tip, babe: the arrows and colored zones show break. Safe is calm, red is rude, aim like you have consequences.",
+  "Break changes by zone. Green is polite, red is nasty, and nasty absolutely will drag your ball sideways.",
   "Tip, but make it rude: safe zones are where the ball calms down. Try one.",
   "Little lesson, babe: rough steals power, but break still drags the ball sideways.",
   "Aim at landing spots, not just the cup. The cup is needy, not always practical.",
@@ -415,17 +413,19 @@ const mechanicTipLines = [
   "If you're in sand, stop being romantic and take the wedge.",
   "Rough catches weak shots. Overcooked shots still run away like a bad date.",
   "The fringe gives you a chance, not a guarantee. Very modern relationship.",
-  "Flick speed matters. Lazy pullbacks get lazy little results.",
-  "The farther you pull, the more power. The straighter you pull, the less drama.",
+  "Flick speed matters for max power. Holding the pullback too long drains the sauce.",
+  "Green, yellow, red: more pull, more power. Release quick before the shot gets stale.",
   "If the course bends, play the bend. Don't argue with landscaping.",
+  "The pale true line on the green is calm. Earn that angle and you can actually hole the thing.",
 ];
 
 const firstHoleRundownLines = [
   "Quick rundown: tap where you want to aim, then start the pull in the SWING ZONE.",
   "Pull straight down for a straight shot. Drift sideways and the ball starts acting divorced.",
-  "Driver and flop need a real flick. Chip and putter care more about clean pull and touch.",
+  "Green, yellow, and red in the swing zone are power tiers. Red is big, flick is pure.",
   "Safe zones calm the break. Land there when the course looks rude.",
-  "Break bar reads your current lie: safe is calm, nasty means the rollout will get dragged sideways.",
+  "Read the arrows and colored break zones: safe is calm, red means rollout gets dragged sideways.",
+  "The pale lane on the green is the true line. Get there with the right speed and the cup will finally behave.",
   "Sand wants Rusty Flirt. Green wants Tiny Tapper. Water and sand only punish if you land in them.",
 ];
 
@@ -600,6 +600,7 @@ let target = {};
 let hazards = [];
 let bumpers = [];
 let safeZones = [];
+let trueLineZone = null;
 let decorations = [];
 let greenBreak = { x: 0, y: 0, strength: 0, label: "Flat" };
 let breakZones = [];
@@ -613,6 +614,7 @@ const playableMargin = { left: 12, right: 12, top: 12, bottom: 92 };
 let aimAnchor = { x: W / 2, y: H / 2 };
 let aimStartedAt = 0;
 let lastAimPoint = null;
+let lastPullGainAt = 0;
 let flickSpeed = 0;
 let aimTarget = null;
 
@@ -762,8 +764,35 @@ function makeBreakArrows() {
   });
 }
 
+function makeTrueLineZone() {
+  const routeLength = Math.max(1, coursePathLength());
+  const pureDriverPixels = estimateIdealShotPixels("driver", 1);
+  const reachable = routeLength <= pureDriverPixels * 1.04;
+  const firstShotT = clamp(pureDriverPixels / routeLength, 0.34, 0.86);
+  const approachPoint = reachable ? teePosition : pathPointAt(firstShotT);
+  const dx = target.x - approachPoint.x;
+  const dy = target.y - approachPoint.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const approach = { x: dx / len, y: dy / len, angle: Math.atan2(dy, dx) };
+  trueLineZone = {
+    x: target.x - approach.x * target.r * 2.15,
+    y: target.y - approach.y * target.r * 2.15,
+    rx: target.r * (reachable ? 5.55 : 5.1),
+    ry: target.r * 0.76,
+    angle: approach.angle,
+    xForce: 0,
+    yForce: 0,
+    strength: 0.0006,
+    safe: true,
+    trueLine: true,
+    reachable,
+  };
+  breakZones.push(trueLineZone);
+}
+
 function makeBreakZones() {
   breakZones = [];
+  trueLineZone = null;
   const directions = [
     { x: 1, y: 0.22 },
     { x: -1, y: 0.18 },
@@ -816,6 +845,8 @@ function makeBreakZones() {
     });
   });
 
+  makeTrueLineZone();
+
   safeZones.forEach((zone) => {
     breakZones.push({
       x: zone.x,
@@ -842,6 +873,7 @@ function localBreakAt(point = ball) {
       strength: zone.strength,
       safe: zone.safe,
       greenCollar: zone.greenCollar,
+      trueLine: zone.trueLine,
     };
   }
   return {
@@ -961,9 +993,28 @@ function currentSafeZone() {
   return safeZones.find((zone) => inEllipseZone(zone, ball.x, ball.y));
 }
 
+function hazardContainsBall(hazard, c = ball) {
+  if (!hazard || !c) return false;
+  if (hazard.type === "water") {
+    const cx = hazard.x + hazard.w / 2;
+    const cy = hazard.y + hazard.h / 2;
+    const rx = hazard.w * 0.52 + c.r * 0.55;
+    const ry = hazard.h * 0.56 + c.r * 0.55;
+    return ((c.x - cx) * (c.x - cx)) / (rx * rx) + ((c.y - cy) * (c.y - cy)) / (ry * ry) <= 1;
+  }
+  if (hazard.type === "sand") {
+    const cx = hazard.x + hazard.w / 2;
+    const cy = hazard.y + hazard.h / 2;
+    const rx = hazard.w * 0.55 + c.r * 0.55;
+    const ry = hazard.h * 0.58 + c.r * 0.55;
+    return ((c.x - cx) * (c.x - cx)) / (rx * rx) + ((c.y - cy) * (c.y - cy)) / (ry * ry) <= 1;
+  }
+  return inRectCircle(hazard, c);
+}
+
 function currentHazard() {
   return hazards.find((hazard) => {
-    if (!inRectCircle(hazard, ball)) return false;
+    if (!hazardContainsBall(hazard)) return false;
     return !ball.airborne && ball.z <= 0;
   });
 }
@@ -1181,11 +1232,11 @@ function struggleReminder(reason) {
 function swingAnchor() {
   const bounds = playableBounds();
   return {
-    x: clamp(bounds.left + 92, bounds.left + 76, bounds.right - 76),
-    y: clamp(bounds.top + 128, bounds.top + 102, bounds.bottom - 250),
-    r: 34,
-    laneW: 110,
-    laneH: 260,
+    x: clamp(bounds.left + 104, bounds.left + 82, bounds.right - 82),
+    y: clamp(bounds.top + 138, bounds.top + 108, bounds.bottom - 278),
+    r: 36,
+    laneW: 96,
+    laneH: 286,
   };
 }
 
@@ -1237,6 +1288,37 @@ function yardsFromPixels(pixels) {
   return Math.max(1, Math.round(pixels / 5));
 }
 
+function estimateIdealShotPixels(shotClubKey, powerRatio = 1) {
+  const club = clubs[shotClubKey] || clubs.driver;
+  let vx = club.power * clamp(powerRatio, 0, 1);
+  let z = club.loft ? 2 : 0;
+  let vz = club.loft ? (vx / club.power) * club.loft : 0;
+  let airborne = club.loft > 0;
+  let traveled = 0;
+  for (let i = 0; i < 900; i += 1) {
+    const speed = Math.abs(vx);
+    if (!airborne && speed < 0.11) break;
+    traveled += speed;
+    if (airborne) {
+      vz -= 1.28;
+      z += vz;
+      if (z <= 0) {
+        z = 0;
+        airborne = false;
+        const bouncePower = club.bounce * 0.9;
+        if (club.bounce > 0.1 && speed > 2.2) {
+          vx *= 0.88 + bouncePower * 0.12;
+          vz = speed * bouncePower * 0.82;
+          if (vz > 2.2) airborne = true;
+        }
+      }
+    }
+    vx *= Math.min(0.99, club.drag + 0.002);
+    if (!airborne && speed < 0.62) vx *= 0.94;
+  }
+  return traveled;
+}
+
 function isWedgeKey(clubKey) {
   return clubKey === "wedge" || clubKey === "wedgeChip";
 }
@@ -1272,14 +1354,41 @@ function effectivePowerRatio(shot) {
   const shotClubKey = selectedClubKeyForShot();
   const flick = clamp((flickSpeed - 0.18) / 1.62, 0, 1);
   const profiles = {
-    driver: { base: 0.025, flick: 0.975, curve: 1.42 },
-    wedge: { base: 0.052, flick: 0.948, curve: 1.42 },
-    wedgeChip: { base: 0.42, flick: 0.58, curve: 0.9 },
-    putter: { base: 0.68, flick: 0.32, curve: 0.78 },
+    driver: { flick: 1, curve: 1.42 },
+    wedge: { flick: 1, curve: 1.42 },
+    wedgeChip: { flick: 0.72, curve: 0.9 },
+    putter: { flick: 0.44, curve: 0.78 },
   };
   const profile = profiles[shotClubKey] || profiles.putter;
   const flickCurve = Math.pow(flick, profile.curve);
-  return clamp(shot.ratio * (profile.base + flickCurve * profile.flick), 0, 1);
+  const zonePower = swingZonePower(shot.ratio);
+  return clamp((zonePower + (1 - zonePower) * flickCurve * profile.flick) * swingHoldPenalty(shot), 0, 1);
+}
+
+function swingZonePower(ratio) {
+  const r = clamp(ratio, 0, 1);
+  if (r < 0.34) return (r / 0.34) * 0.33;
+  if (r < 0.55) return 0.33 + ((r - 0.34) / 0.21) * 0.18;
+  if (r < 0.76) return 0.51 + ((r - 0.55) / 0.21) * 0.15;
+  return 0.66 + ((r - 0.76) / 0.24) * 0.33;
+}
+
+function swingZoneLabel(ratio) {
+  const r = clamp(ratio, 0, 1);
+  if (r < 0.34) return "BUILD";
+  if (r < 0.55) return "GREEN";
+  if (r < 0.76) return "YELLOW";
+  return "RED";
+}
+
+function swingHoldPenalty(shot = null) {
+  if (!lastPullGainAt) return 1;
+  const holdMs = performance.now() - lastPullGainAt;
+  const ratio = shot ? clamp(shot.ratio, 0, 1) : 0;
+  const deepPull = clamp((ratio - 0.76) / 0.24, 0, 1);
+  const grace = 240 - deepPull * 190;
+  const drainWindow = 980 - deepPull * 520;
+  return 1 - clamp((holdMs - grace) / drainWindow, 0, 1) * 0.78;
 }
 
 function recordAimPointer(nextPointer, now = performance.now()) {
@@ -1287,7 +1396,10 @@ function recordAimPointer(nextPointer, now = performance.now()) {
   if (lastAimPoint) {
     const dt = Math.max(10, now - lastAimPoint.time);
     const pullChange = nextPull - lastAimPoint.pull;
-    if (pullChange > 0) flickSpeed = Math.max(flickSpeed, pullChange / dt);
+    if (pullChange > 0.6) {
+      flickSpeed = Math.max(flickSpeed, pullChange / dt);
+      lastPullGainAt = now;
+    }
   }
   pointer = nextPointer;
   lastAimPoint = { x: pointer.x, y: pointer.y, pull: nextPull, time: now };
@@ -1297,7 +1409,7 @@ function recordAimPointer(nextPointer, now = performance.now()) {
 
 function pointInSwingStart(point) {
   const trigger = swingAnchor();
-  return Math.hypot(point.x - trigger.x, point.y - trigger.y) <= trigger.r * 1.45;
+  return Math.hypot(point.x - trigger.x, point.y - trigger.y) <= trigger.r * 1.55;
 }
 
 function setAimTarget(point) {
@@ -1328,6 +1440,7 @@ function blokeSay(text, mood = "talk", ttl = 220) {
 function setMessage(text, ttl = 180, mood = "talk") {
   setText(toastEl, text);
   messageTimer = Math.min(ttl, 150);
+  blokeSay(text, mood, Math.min(ttl, 170));
   const speechStyle = {
     roast: { rate: 1.04, pitch: 1.2, volume: 0.88, pauseMs: 70 },
     good: { rate: 1.13, pitch: 1.36, volume: 0.98, pauseMs: 55 },
@@ -1526,11 +1639,13 @@ function updateShotStats() {
   }
   const shotLabel = shotClubKey === "wedgeChip" ? "Flirt Chip" : clubs[shotClubKey]?.name || "Club";
   const averageRatio = shotClubKey === "driver" ? 0.46 : shotClubKey === "wedge" ? 0.43 : shotClubKey === "wedgeChip" ? 0.42 : 0.38;
+  const averageYards = estimateShotYards(shotClubKey, averageRatio);
+  const pureYards = estimateShotYards(shotClubKey, 1);
   setText(pinYardageEl, `${yardsFromPixels(routeDistanceRemaining(ball))} yd`);
-  setText(avgYardageLabelEl, `${shotLabel} Avg`);
-  setText(avgYardageEl, `${estimateShotYards(shotClubKey, averageRatio)} yd`);
-  setText(perfectYardageLabelEl, `${shotLabel} Pure`);
-  setText(perfectYardageEl, `${estimateShotYards(shotClubKey, 1)} yd`);
+  setText(avgYardageLabelEl, `${shotLabel} ${Math.round(averageRatio * 100)}%`);
+  setText(avgYardageEl, `${averageYards} yd`);
+  setText(perfectYardageLabelEl, `${shotLabel} Max`);
+  setText(perfectYardageEl, `${pureYards} yd`);
 }
 
 function syncBallPickerVisibility() {
@@ -2108,6 +2223,10 @@ function updateFullscreenButton() {
   setText(fullscreenToggle, isFullscreen() || isExpanded() ? "Exit Full" : "Fullscreen");
 }
 
+function isMobileViewport() {
+  return window.matchMedia("(max-width: 760px), (pointer: coarse)").matches;
+}
+
 function requestFullscreen(element) {
   if (element.requestFullscreen) return element.requestFullscreen();
   if (element.webkitRequestFullscreen) return element.webkitRequestFullscreen();
@@ -2120,6 +2239,26 @@ function exitFullscreen() {
   if (document.webkitExitFullscreen) return document.webkitExitFullscreen();
   if (document.msExitFullscreen) return document.msExitFullscreen();
   return Promise.resolve();
+}
+
+function enterFullscreenOrExpand(message = "Fullscreen blocked, so we stretched it here instead.") {
+  if (!gameCard) return Promise.resolve(false);
+  if (isFullscreen() || isExpanded()) {
+    updateFullscreenButton();
+    return Promise.resolve(true);
+  }
+  return requestFullscreen(gameCard)
+    .then(() => {
+      updateFullscreenButton();
+      return true;
+    })
+    .catch(() => {
+      gameCard.classList.add("app-fullscreen");
+      document.body.classList.add("game-expanded");
+      updateFullscreenButton();
+      setMessage(message, 180);
+      return false;
+    });
 }
 
 function toggleFullscreen() {
@@ -2135,16 +2274,7 @@ function toggleFullscreen() {
     exitFullscreen().catch(() => setMessage("Fullscreen got wedged. Classic.", 120));
     return;
   }
-  requestFullscreen(gameCard).then(updateFullscreenButton).catch(() => {
-    if (gameCard) {
-      gameCard.classList.add("app-fullscreen");
-      document.body.classList.add("game-expanded");
-      updateFullscreenButton();
-      setMessage("Fullscreen blocked, so we stretched it here instead. On phone, tap anywhere on the grass and pull back.", 180);
-      return;
-    }
-    setMessage("Fullscreen was blocked by this browser.", 180);
-  });
+  enterFullscreenOrExpand("Fullscreen blocked, so we stretched it here instead. On phone, tap anywhere on the grass and pull back.");
 }
 
 function createHazard(t, sideOffset, type, width = rnd(92, 158), height = rnd(38, 78)) {
@@ -2257,6 +2387,35 @@ function addStrategicWaterTraps() {
   });
 }
 
+function addGreenCarryWater() {
+  const tangent = pathTangentAt(0.94);
+  const side = { x: -tangent.y, y: tangent.x };
+  const pools = [
+    { ahead: 70, side: hole % 2 ? -48 : 48, w: 58, h: 26 },
+    { ahead: 28, side: hole % 3 === 0 ? 58 : -58, w: 48, h: 22 },
+  ];
+  pools.forEach((pool, index) => {
+    if (index > 0 && hole < 5) return;
+    const w = pool.w + rnd(-8, 7);
+    const h = pool.h + rnd(-4, 5);
+    const x = target.x - tangent.x * pool.ahead + side.x * pool.side - w / 2;
+    const y = target.y - tangent.y * pool.ahead + side.y * pool.side - h / 2;
+    const candidate = {
+      x: clamp(x, 50, W - w - 50),
+      y: clamp(y, 58, playableBounds().bottom - h - 28),
+      w,
+      h,
+      type: "water",
+      greenCarry: true,
+    };
+    const cupClear = Math.hypot(candidate.x + candidate.w / 2 - target.x, candidate.y + candidate.h / 2 - target.y) > target.r * 3.0;
+    const trueLineClear = !trueLineZone || !inEllipseZone(trueLineZone, candidate.x + candidate.w / 2, candidate.y + candidate.h / 2);
+    if (cupClear && trueLineClear && !hazards.some((hazard) => rectsOverlap(hazard, candidate, 8))) {
+      hazards.push(candidate);
+    }
+  });
+}
+
 if ("speechSynthesis" in window) {
   window.speechSynthesis.onvoiceschanged = () => {
     announcerVoice = null;
@@ -2311,6 +2470,7 @@ function newHole(keepStreak = true) {
   if (hole > 2 || course.hazardBonus > 0) addHazard(rnd(0.58, 0.72), rnd(-24, 24), "sand", rnd(92, 126), rnd(36, 58));
   if (hole % 3 === 0 || course.hazardBonus > 1) addHazard(rnd(0.54, 0.74), rnd(-48, 48), "water", rnd(104, 150), rnd(36, 58));
   addStrategicWaterTraps();
+  addGreenCarryWater();
   for (let i = 0; i < hazardCount; i++) {
     const side = i % 2 ? 1 : -1;
     const t = rnd(0.25, 0.88);
@@ -2412,13 +2572,14 @@ function beginAim(event) {
   aimStart = aimAnchor;
   pointer = p;
   aimStartedAt = performance.now();
+  lastPullGainAt = aimStartedAt;
   lastAimPoint = { x: p.x, y: p.y, pull: Math.max(0, p.y - aimAnchor.y), time: aimStartedAt };
   swingTrace = [{ x: p.x, y: p.y, life: 1 }];
   swingTraceTimer = 0;
   lastReleaseFeedback = null;
   flickSpeed = 0;
   setMusicEnergy("aim", 1200);
-  setToastOnly("Pull straight down. Quick flick gets the sauce.", 90);
+  setToastOnly("Pull into green, yellow, or red. Hold too long and it leaks power.", 110);
   if (event.pointerId !== undefined && canvas.setPointerCapture) {
     canvas.setPointerCapture(event.pointerId);
   }
@@ -2510,6 +2671,8 @@ function endAim(event) {
       grade: grade.label,
       edgeRatio: shot.edgeRatio,
       clubKey: shotClubKey,
+      zone: swingZoneLabel(shot.ratio),
+      holdPenalty: swingHoldPenalty(shot),
     };
     const player = players[activePlayerIndex];
     if (player) {
@@ -2576,6 +2739,7 @@ function endAim(event) {
 
   aimHints = [];
   lastAimPoint = null;
+  lastPullGainAt = 0;
   flickSpeed = 0;
   aimTarget = null;
   if (powerBar) powerBar.style.width = "0%";
@@ -2778,6 +2942,70 @@ function inRectCircle(rect, c) {
   return Math.hypot(c.x - nx, c.y - ny) < c.r;
 }
 
+function circleHitResponse(cx, cy, r, bounce = 0.62) {
+  const dx = ball.x - cx;
+  const dy = ball.y - cy;
+  const d = Math.hypot(dx, dy);
+  if (d >= ball.r + r) return false;
+  const nx = dx / (d || 1);
+  const ny = dy / (d || 1);
+  const dot = ball.vx * nx + ball.vy * ny;
+  ball.vx -= 2 * dot * nx;
+  ball.vy -= 2 * dot * ny;
+  ball.vx *= bounce;
+  ball.vy *= bounce;
+  ball.x = cx + nx * (ball.r + r + 0.8);
+  ball.y = cy + ny * (ball.r + r + 0.8);
+  ball.curveSpin *= 0.45;
+  return true;
+}
+
+function rectHitResponse(rect, bounce = 0.55) {
+  const nx = clamp(ball.x, rect.x, rect.x + rect.w);
+  const ny = clamp(ball.y, rect.y, rect.y + rect.h);
+  const dx = ball.x - nx;
+  const dy = ball.y - ny;
+  const d = Math.hypot(dx, dy);
+  if (d >= ball.r) return false;
+  const axisX = Math.abs(dx) > Math.abs(dy);
+  const normalX = axisX ? Math.sign(dx || ball.vx || 1) : 0;
+  const normalY = axisX ? 0 : Math.sign(dy || ball.vy || 1);
+  const dot = ball.vx * normalX + ball.vy * normalY;
+  ball.vx -= 2 * dot * normalX;
+  ball.vy -= 2 * dot * normalY;
+  ball.vx *= bounce;
+  ball.vy *= bounce;
+  if (axisX) ball.x = nx + normalX * (ball.r + 0.8);
+  else ball.y = ny + normalY * (ball.r + 0.8);
+  ball.curveSpin *= 0.45;
+  return true;
+}
+
+function collideTree(item) {
+  if (!item || item.type !== "gum") return false;
+  const s = item.s || 1;
+  if (ball.z > 68 * s) return false;
+  const trunk = {
+    x: item.x - 4 * s,
+    y: item.y - 2 * s,
+    w: 8 * s,
+    h: 28 * s,
+  };
+  if (rectHitResponse(trunk, 0.48)) return true;
+  const canopy = [
+    [0, -20, 24],
+    [-15, -6, 18],
+    [14, -6, 20],
+    [2, 4, 17],
+  ];
+  return canopy.some(([x, y, r]) => circleHitResponse(item.x + x * s, item.y + y * s, r * s, 0.58));
+}
+
+function collideTreeObstacles() {
+  if (ball.airborne && ball.z > 68) return false;
+  return decorations.some((item) => collideTree(item));
+}
+
 function updatePhysics(dt) {
   if (!ball.moving) return;
 
@@ -2908,7 +3136,7 @@ function updatePhysics(dt) {
   }
 
   for (const hazard of hazards) {
-    if (inRectCircle(hazard, ball)) {
+    if (hazardContainsBall(hazard)) {
       if (ball.airborne || ball.z > 0) continue;
       const slow = hazard.type === "sand" ? (isWedgeKey(activeClubKey) ? 0.9 : activeClubKey === "driver" ? 0.84 : 0.56) : 0.34;
       ball.vx *= Math.pow(slow, dt);
@@ -2919,6 +3147,8 @@ function updatePhysics(dt) {
       }
     }
   }
+
+  if (collideTreeObstacles()) return;
 
   for (const bumper of bumpers) {
     const dx = ball.x - bumper.x;
@@ -3012,6 +3242,7 @@ function drawCourse() {
   }
 
   safeDraw(drawBreakZones);
+  safeDraw(drawTrueLine);
   safeDraw(drawBreakArrows);
   safeDraw(drawSafeZones);
   safeDraw(drawYardageMarkers);
@@ -3025,7 +3256,6 @@ function drawCourse() {
   for (const bumper of bumpers) safeDraw(() => drawBumper(bumper));
   safeDraw(drawOutOfBoundsStakes);
   safeDraw(drawCup);
-  safeDraw(drawLieBadge);
   safeDraw(drawVignette);
 }
 
@@ -3150,27 +3380,38 @@ function drawFairway() {
   ctx.save();
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
+  const route = new Path2D();
+  route.moveTo(teePosition.x, teePosition.y);
+  route.lineTo(doglegPoint.x, doglegPoint.y);
+  route.lineTo(target.x, target.y);
   ctx.shadowColor = "rgba(255, 244, 178, 0.16)";
   ctx.shadowBlur = 16;
   ctx.strokeStyle = "rgba(91, 170, 91, 0.2)";
   ctx.lineWidth = 142;
-  ctx.beginPath();
-  ctx.moveTo(teePosition.x, teePosition.y);
-  ctx.lineTo(doglegPoint.x, doglegPoint.y);
-  ctx.lineTo(target.x, target.y);
-  ctx.stroke();
+  ctx.stroke(route);
   ctx.shadowColor = "transparent";
   ctx.strokeStyle = "rgba(113, 189, 95, 0.42)";
   ctx.lineWidth = 96;
-  ctx.stroke();
+  ctx.stroke(route);
+  ctx.strokeStyle = "rgba(12, 54, 28, 0.28)";
+  ctx.lineWidth = 102;
+  ctx.stroke(route);
+  ctx.strokeStyle = "rgba(113, 189, 95, 0.48)";
+  ctx.lineWidth = 90;
+  ctx.stroke(route);
+  ctx.strokeStyle = "rgba(180, 231, 130, 0.16)";
+  ctx.lineWidth = 64;
+  ctx.setLineDash([38, 24]);
+  ctx.stroke(route);
+  ctx.setLineDash([]);
   ctx.strokeStyle = "rgba(255, 249, 233, 0.18)";
   ctx.lineWidth = 100;
   ctx.setLineDash([2, 22]);
-  ctx.stroke();
+  ctx.stroke(route);
   ctx.strokeStyle = "rgba(255, 249, 233, 0.12)";
   ctx.lineWidth = 2;
   ctx.setLineDash([12, 12]);
-  ctx.stroke();
+  ctx.stroke(route);
   ctx.restore();
 }
 
@@ -3194,35 +3435,61 @@ function drawGreenComplex() {
   ctx.restore();
 }
 
+function drawTrueLine() {
+  if (!trueLineZone || ![trueLineZone.x, trueLineZone.y, trueLineZone.rx, trueLineZone.ry].every(Number.isFinite)) return;
+  ctx.save();
+  ctx.translate(trueLineZone.x, trueLineZone.y);
+  ctx.rotate(trueLineZone.angle);
+  ctx.shadowColor = "rgba(255, 249, 233, 0.2)";
+  ctx.shadowBlur = 8;
+  ctx.fillStyle = "rgba(255, 249, 233, 0.09)";
+  ctx.strokeStyle = "rgba(255, 249, 233, 0.38)";
+  ctx.lineWidth = 2;
+  ctx.setLineDash([8, 8]);
+  ctx.beginPath();
+  ctx.ellipse(0, 0, trueLineZone.rx, trueLineZone.ry, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.shadowColor = "transparent";
+  ctx.fillStyle = "rgba(255, 249, 233, 0.5)";
+  ctx.font = "900 10px Arial";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("TRUE LINE", 0, 1);
+  ctx.restore();
+}
+
 function drawTeeBox() {
   if (![teePosition.x, teePosition.y].every(Number.isFinite)) return;
   ctx.save();
   ctx.translate(teePosition.x, teePosition.y);
-  ctx.rotate(-0.08);
+  ctx.rotate(-0.04);
   ctx.fillStyle = "rgba(13, 34, 24, 0.28)";
   ctx.beginPath();
-  ctx.ellipse(0, 14, 58, 18, 0, 0, Math.PI * 2);
+  ctx.ellipse(0, 10, 24, 60, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = "rgba(255, 249, 233, 0.22)";
-  roundRect(-46, -14, 92, 34, 10);
+  roundRect(-22, -54, 44, 108, 12);
   ctx.fill();
   ctx.strokeStyle = "rgba(255, 249, 233, 0.36)";
   ctx.lineWidth = 2;
   ctx.stroke();
-  for (const x of [-26, 26]) {
+  for (const y of [-34, 34]) {
     ctx.fillStyle = "#f2c14e";
     ctx.beginPath();
-    ctx.arc(x, 1, 6, 0, Math.PI * 2);
+    ctx.arc(0, y, 6, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = "#10261d";
     ctx.lineWidth = 2;
     ctx.stroke();
   }
   ctx.fillStyle = "rgba(16, 38, 29, 0.72)";
-  ctx.font = "900 11px Arial";
+  ctx.font = "900 10px Arial";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText("TEE", 0, 2);
+  ctx.fillText("WACKIN", 0, -6);
+  ctx.fillText("BOX", 0, 9);
   ctx.restore();
 }
 
@@ -3444,6 +3711,8 @@ function drawNastyMeter(x, y) {
   const height = 76;
   const power = lastReleaseFeedback ? clamp(lastReleaseFeedback.powerRatio, 0, 1) : 0;
   const grade = lastReleaseFeedback?.grade || "No Shot";
+  const zone = lastReleaseFeedback?.zone || "READY";
+  const leaked = lastReleaseFeedback ? lastReleaseFeedback.holdPenalty < 0.82 : false;
   const clubKey = lastReleaseFeedback?.clubKey || selectedClubKeyForShot();
   const clubName = clubKey === "wedgeChip" ? "Chip" : clubs[clubKey]?.name || "Club";
   const color = power > 0.78 ? "#ef6f4e" : power > 0.48 ? "#f2c14e" : "#74d38a";
@@ -3460,7 +3729,7 @@ function drawNastyMeter(x, y) {
   ctx.fillText("NASTY METER", x + 14, y + 23);
   ctx.fillStyle = "rgba(255, 249, 233, 0.76)";
   ctx.font = "800 10px Arial";
-  ctx.fillText(`${clubName.toUpperCase()} RELEASE`, x + 14, y + 40);
+  ctx.fillText(`${zone} ${clubName.toUpperCase()}`, x + 14, y + 40);
 
   ctx.fillStyle = "rgba(255, 249, 233, 0.18)";
   roundRect(x + 14, y + 48, width - 28, 12, 7);
@@ -3475,7 +3744,7 @@ function drawNastyMeter(x, y) {
   ctx.fillText(`${Math.round(power * 100)}%`, x + width - 14, y + 23);
   ctx.fillStyle = "rgba(255, 249, 233, 0.82)";
   ctx.font = "800 10px Arial";
-  ctx.fillText(grade.toUpperCase(), x + width - 14, y + 40);
+  ctx.fillText(leaked ? "HOLD LEAK" : grade.toUpperCase(), x + width - 14, y + 40);
   ctx.textAlign = "left";
 }
 
@@ -3509,27 +3778,55 @@ function drawHazard(h) {
   if (h.type === "sand") {
     drawSandPit(h);
   } else {
-    roundRect(h.x, h.y, h.w, h.h, 18);
+    waterPitPath(h);
     const waterGrad = ctx.createLinearGradient(h.x, h.y, h.x + h.w, h.y + h.h);
     waterGrad.addColorStop(0, "#5aa3b5");
-    waterGrad.addColorStop(0.5, "#2f758f");
-    waterGrad.addColorStop(1, "#1d506a");
+    waterGrad.addColorStop(0.42, "#2f8aa2");
+    waterGrad.addColorStop(1, "#174b68");
     ctx.fillStyle = waterGrad;
     ctx.fill();
-    ctx.strokeStyle = "rgba(255,249,233,0.34)";
+    ctx.strokeStyle = "rgba(191, 236, 242, 0.52)";
     ctx.lineWidth = 3;
     ctx.stroke();
-    ctx.strokeStyle = "rgba(255,255,255,0.28)";
-    ctx.lineWidth = 2;
-    for (let i = 0; i < 3; i++) {
+
+    ctx.save();
+    waterPitPath(h);
+    ctx.clip();
+    ctx.strokeStyle = "rgba(255,255,255,0.34)";
+    ctx.lineWidth = h.greenCarry ? 1.5 : 2;
+    for (let i = 0; i < 4; i++) {
       ctx.beginPath();
-      const y = h.y + h.h * (0.3 + i * 0.18);
-      ctx.moveTo(h.x + 10, y);
-      ctx.quadraticCurveTo(h.x + h.w * 0.45, y - 10, h.x + h.w - 10, y + 2);
+      const y = h.y + h.h * (0.22 + i * 0.16);
+      ctx.moveTo(h.x + h.w * 0.12, y);
+      ctx.bezierCurveTo(
+        h.x + h.w * 0.32,
+        y - h.h * 0.18,
+        h.x + h.w * 0.62,
+        y + h.h * 0.14,
+        h.x + h.w * 0.9,
+        y - h.h * 0.03
+      );
       ctx.stroke();
     }
+    ctx.fillStyle = "rgba(255, 249, 233, 0.12)";
+    ctx.beginPath();
+    ctx.ellipse(h.x + h.w * 0.36, h.y + h.h * 0.3, h.w * 0.18, h.h * 0.08, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
   ctx.restore();
+}
+
+function waterPitPath(h) {
+  const cx = h.x + h.w / 2;
+  const cy = h.y + h.h / 2;
+  ctx.beginPath();
+  ctx.moveTo(cx - h.w * 0.46, cy - h.h * 0.08);
+  ctx.bezierCurveTo(cx - h.w * 0.54, cy - h.h * 0.42, cx - h.w * 0.18, cy - h.h * 0.62, cx + h.w * 0.08, cy - h.h * 0.46);
+  ctx.bezierCurveTo(cx + h.w * 0.42, cy - h.h * 0.64, cx + h.w * 0.58, cy - h.h * 0.18, cx + h.w * 0.48, cy + h.h * 0.12);
+  ctx.bezierCurveTo(cx + h.w * 0.54, cy + h.h * 0.48, cx + h.w * 0.1, cy + h.h * 0.6, cx - h.w * 0.16, cy + h.h * 0.42);
+  ctx.bezierCurveTo(cx - h.w * 0.48, cy + h.h * 0.58, cx - h.w * 0.62, cy + h.h * 0.2, cx - h.w * 0.46, cy - h.h * 0.08);
+  ctx.closePath();
 }
 
 function sandPitPath(h) {
@@ -3656,6 +3953,7 @@ function currentLieInfo() {
   const hazard = currentHazard();
   if (hazard?.type === "sand") return { label: "SAND", tip: "Wedge wants a full fling", color: "#d3b872" };
   if (hazard?.type === "water") return { label: "WATER", tip: "Fly over, don't land", color: "#5aa3b5" };
+  if (localBreakAt(ball).trueLine) return { label: "TRUE LINE", tip: "Break goes quiet", color: "#fff9e9" };
   if (currentSafeZone()) return { label: "SAFE", tip: "Flat-ish landing", color: "#8ce276" };
   if (distance(ball, target) < target.r * 3.9) return { label: "GREEN", tip: "Putter behaves here", color: "#aee877" };
   const miss = fairwaySideMiss(ball);
@@ -3917,20 +4215,32 @@ function drawSwingTrigger() {
   ctx.save();
   const laneX = trigger.x - trigger.laneW / 2;
   const laneY = trigger.y - 18;
-  ctx.globalAlpha = aimTarget ? 0.78 : 0.5;
+  ctx.globalAlpha = aimTarget ? 0.94 : 0.72;
+  const activeShot = aiming && pointer ? shotVector() : null;
+  const activeZone = activeShot ? swingZoneLabel(activeShot.ratio) : "";
 
   const zones = [
-    { y: laneY + trigger.laneH * 0.34, h: trigger.laneH * 0.18, color: "rgba(82, 190, 88, 0.5)", stroke: "rgba(184, 255, 160, 0.58)" },
-    { y: laneY + trigger.laneH * 0.55, h: trigger.laneH * 0.18, color: "rgba(244, 189, 77, 0.48)", stroke: "rgba(255, 230, 156, 0.56)" },
-    { y: laneY + trigger.laneH * 0.76, h: trigger.laneH * 0.16, color: "rgba(240, 123, 93, 0.5)", stroke: "rgba(255, 165, 140, 0.58)" },
+    { label: "33%", y: laneY + trigger.laneH * 0.34, h: trigger.laneH * 0.18, color: "rgba(82, 190, 88, 0.78)", stroke: "rgba(184, 255, 160, 0.78)" },
+    { label: "66%", y: laneY + trigger.laneH * 0.55, h: trigger.laneH * 0.18, color: "rgba(244, 189, 77, 0.78)", stroke: "rgba(255, 230, 156, 0.76)" },
+    { label: "99%", y: laneY + trigger.laneH * 0.76, h: trigger.laneH * 0.16, color: "rgba(240, 123, 93, 0.8)", stroke: "rgba(255, 165, 140, 0.78)" },
   ];
   zones.forEach((zone) => {
+    const zoneName = zone.label === "33%" ? "GREEN" : zone.label === "66%" ? "YELLOW" : "RED";
+    const isActive = activeZone === zoneName;
     ctx.fillStyle = zone.color;
-    ctx.strokeStyle = zone.stroke;
-    ctx.lineWidth = 1.5;
-    roundRect(laneX + 8, zone.y, trigger.laneW - 16, zone.h, 10);
+    ctx.strokeStyle = isActive ? "rgba(255, 249, 233, 0.92)" : zone.stroke;
+    ctx.lineWidth = isActive ? 3 : 1.5;
+    ctx.shadowColor = isActive ? zone.stroke : "transparent";
+    ctx.shadowBlur = isActive ? 12 : 0;
+    roundRect(laneX + 6, zone.y, trigger.laneW - 12, zone.h, 8);
     ctx.fill();
     ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "rgba(16, 38, 29, 0.82)";
+    ctx.font = "900 12px Arial";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(zone.label, trigger.x, zone.y + zone.h / 2);
   });
 
   ctx.strokeStyle = "rgba(255, 249, 233, 0.26)";
@@ -3971,6 +4281,7 @@ function drawAim() {
   ctx.save();
   if (activeShot && shot) {
     const powerRatio = clamp(effectivePowerRatio(shot), 0, 1);
+    if (powerBar) powerBar.style.width = `${Math.round(powerRatio * 100)}%`;
     const shotClubKey = selectedClubKeyForShot();
     const powerLength = estimateShotYards(shotClubKey, Math.max(powerRatio, 0.04)) * 5;
     const dx = Math.cos(shot.baseAngle);
@@ -4010,7 +4321,8 @@ function drawAim() {
     ctx.lineWidth = 4;
     const labelX = ball.x + dx * (powerLength + 22);
     const labelY = ball.y + dy * (powerLength + 22);
-    const label = `${Math.round(powerRatio * 100)}%`;
+    const stale = swingHoldPenalty(shot) < 0.82;
+    const label = stale ? `${Math.round(powerRatio * 100)}% HOLD` : `${Math.round(powerRatio * 100)}%`;
     ctx.strokeText(label, labelX, labelY);
     ctx.fillText(label, labelX, labelY);
   } else {
@@ -4123,6 +4435,9 @@ menuTabs.forEach((button) => {
 const restartButton = document.getElementById("restart");
 if (introEnter) introEnter.addEventListener("click", () => {
   wakeSound();
+  if (isMobileViewport()) {
+    enterFullscreenOrExpand("Phone mode engaged. If the browser blocks true fullscreen, this stretched view is the backup.");
+  }
   if (introGate) introGate.classList.add("hidden");
   setToastOnly("Welcome to Blokes Mini Golf.", 100);
 });
