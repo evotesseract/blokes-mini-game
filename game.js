@@ -17,6 +17,8 @@ const playerTwoField = document.getElementById("player-two-field");
 const playerTwoBallField = document.getElementById("player-two-ball-field");
 const ballSwatches = document.querySelectorAll(".ball-swatch");
 const offlineStatus = document.getElementById("offline-status");
+const introGate = document.getElementById("intro-gate");
+const introEnter = document.getElementById("intro-enter");
 const scoreEl = document.getElementById("score");
 const bestEl = document.getElementById("best");
 const holeEl = document.getElementById("hole");
@@ -41,6 +43,12 @@ const blokePopup = document.getElementById("bloke-popup");
 const blokeLineEl = document.getElementById("bloke-line");
 const powerBar = document.getElementById("power-bar");
 const clubLabel = document.getElementById("club-label");
+const shotStatsEl = document.getElementById("shot-stats");
+const pinYardageEl = document.getElementById("pin-yardage");
+const avgYardageEl = document.getElementById("avg-yardage");
+const perfectYardageEl = document.getElementById("perfect-yardage");
+const avgYardageLabelEl = document.getElementById("avg-yardage-label");
+const perfectYardageLabelEl = document.getElementById("perfect-yardage-label");
 const wedgeShotToggle = document.getElementById("wedge-shot-toggle");
 const shotModeButtons = document.querySelectorAll(".shot-mode");
 const soundToggle = document.getElementById("sound-toggle");
@@ -66,6 +74,8 @@ const courses = [
   { name: "The Rusty Shaft", key: "rusty-shaft", breakMod: 1.18, hazardBonus: 1, safeScale: 0.9, cupBonus: 0, decor: "scrap" },
   { name: "Mulligan's Hangover", key: "mulligans-hangover", breakMod: 1.32, hazardBonus: 2, safeScale: 0.84, cupBonus: -1, decor: "party" },
 ];
+
+const FIREBASE_LEADERBOARD_URL = "https://blokes-golf-leaderboard-default-rtdb.firebaseio.com";
 
 const openers = [
   "Drag it back, let it rip, blame the club.",
@@ -386,6 +396,8 @@ const obRoasts = [
 ];
 
 const mechanicTipLines = [
+  "Beginner tip, babe: the Break bar reads where your ball is sitting. Safe means calm, nasty means aim like you have consequences.",
+  "That Break meter changes by zone. Green is polite, red is nasty, and nasty absolutely will drag your ball sideways.",
   "Tip, but make it rude: safe zones are where the ball calms down. Try one.",
   "Little lesson, babe: rough steals power, but break still drags the ball sideways.",
   "Aim at landing spots, not just the cup. The cup is needy, not always practical.",
@@ -407,6 +419,38 @@ const mechanicTipLines = [
   "The farther you pull, the more power. The straighter you pull, the less drama.",
   "If the course bends, play the bend. Don't argue with landscaping.",
 ];
+
+const firstHoleRundownLines = [
+  "Quick rundown: tap where you want to aim, then start the pull in the SWING ZONE.",
+  "Pull straight down for a straight shot. Drift sideways and the ball starts acting divorced.",
+  "Driver and flop need a real flick. Chip and putter care more about clean pull and touch.",
+  "Safe zones calm the break. Land there when the course looks rude.",
+  "Break bar reads your current lie: safe is calm, nasty means the rollout will get dragged sideways.",
+  "Sand wants Rusty Flirt. Green wants Tiny Tapper. Water and sand only punish if you land in them.",
+];
+
+const struggleTipLines = {
+  pull: [
+    "Reminder, sweetheart: your pull is wandering. Stay inside the lane unless you want hook-and-slice theatre.",
+    "You're leaving the swing lane. Pull straighter first, then start getting cute.",
+  ],
+  weak: [
+    "That was timid. Pull farther, and flick faster only when you actually need distance.",
+    "Weak sauce. Putter and chip don't need violence, but they do need a proper pull.",
+  ],
+  break: [
+    "You're landing in spicy break. Aim for a safe zone and let the course stop bullying you.",
+    "Nasty break is dragging you. Safe zone first, hero speech later.",
+  ],
+  club: [
+    "Wrong tool, babe. Sand wants wedge, green wants putter, driver wants room to run.",
+    "Club choice is half the game. Stop bringing a hammer to a soup fight.",
+  ],
+  ob: [
+    "Out again. Leave room behind the hole and stop treating red stakes like a suggestion.",
+    "OB means your landing plan is fake. Aim shorter or land safe before sending it.",
+  ],
+};
 
 const greatMechanicLines = [
   "That's why safe zones matter. Flat landing, calmer rollout, less public shame.",
@@ -498,8 +542,12 @@ let speaking = false;
 let announcerVoice = null;
 let lastSpokenLineAt = 0;
 let pointFeed = [];
+let lastReleaseFeedback = null;
+let tutorialQueue = [];
+let tutorialDelay = 0;
 let seededRandomState = 1;
 let courseRandomActive = false;
+const cloudLeaderboardRequests = new Set();
 const chosenBallColors = {
   1: "#fff4d1",
   2: "#f2c14e",
@@ -533,6 +581,8 @@ function createPlayer(name, color) {
     holed: false,
     cleanStreak: 0,
     safeStreak: 0,
+    frustrationStreak: 0,
+    lastReminderStroke: -4,
     bestShot: null,
     worstShot: null,
     ball: createBall(color),
@@ -700,6 +750,16 @@ function makeBreakArrows() {
       });
     }
   }
+
+  breakZones.filter((zone) => zone.greenCollar).forEach((zone) => {
+    breakArrows.push({
+      x: zone.x,
+      y: zone.y,
+      alpha: 0.52,
+      angle: Math.atan2(zone.yForce, zone.xForce),
+      strength: zone.strength,
+    });
+  });
 }
 
 function makeBreakZones() {
@@ -732,6 +792,30 @@ function makeBreakZones() {
     });
   });
 
+  const greenTangent = pathTangentAt(0.94);
+  const greenSide = { x: -greenTangent.y, y: greenTangent.x };
+  const collarStrength = clamp(greenBreak.strength * 1.78, 0.035, 0.072);
+  [
+    { offset: -58, dir: -1, skew: 0.38 },
+    { offset: 54, dir: 1, skew: -0.34 },
+    { offset: 0, dir: courseBend || (hole % 2 ? 1 : -1), skew: 0.12 },
+  ].forEach((collar, index) => {
+    const forceX = greenSide.x * collar.dir + greenTangent.x * collar.skew;
+    const forceY = greenSide.y * collar.dir + greenTangent.y * collar.skew;
+    const len = Math.hypot(forceX, forceY) || 1;
+    breakZones.push({
+      x: target.x + greenSide.x * collar.offset - greenTangent.x * (index === 2 ? 28 : 6),
+      y: target.y + greenSide.y * collar.offset - greenTangent.y * (index === 2 ? 28 : 6),
+      rx: index === 2 ? target.r * 5.8 : target.r * 4.9,
+      ry: index === 2 ? target.r * 2.6 : target.r * 2.15,
+      angle: greenTangent.angle + (index === 2 ? 0 : collar.dir * 0.16),
+      xForce: forceX / len,
+      yForce: forceY / len,
+      strength: collarStrength * (index === 2 ? 0.82 : 1),
+      greenCollar: true,
+    });
+  });
+
   safeZones.forEach((zone) => {
     breakZones.push({
       x: zone.x,
@@ -748,13 +832,16 @@ function makeBreakZones() {
 }
 
 function localBreakAt(point = ball) {
-  const zone = breakZones.find((candidate) => inEllipseZone(candidate, point.x, point.y));
+  const matches = breakZones.filter((candidate) => inEllipseZone(candidate, point.x, point.y));
+  const zone = matches.find((candidate) => candidate.safe) ||
+    matches.sort((a, b) => (b.strength || 0) - (a.strength || 0))[0];
   if (zone) {
     return {
       x: zone.xForce,
       y: zone.yForce,
       strength: zone.strength,
       safe: zone.safe,
+      greenCollar: zone.greenCollar,
     };
   }
   return {
@@ -767,13 +854,13 @@ function localBreakAt(point = ball) {
 
 function makeYardageMarkers() {
   yardageMarkers = [];
-  const totalYards = Math.max(55, Math.round(coursePathLength() / 5));
-  const markerCount = Math.min(4, Math.floor(totalYards / 25));
+  const totalYards = Math.max(55, yardsFromPixels(coursePathLength()));
+  const markerCount = Math.min(7, Math.floor(totalYards / 25));
 
   for (let i = 1; i <= markerCount; i++) {
     const yards = i * 25;
-    const t = yards / totalYards;
-    if (t >= 0.88) continue;
+    const t = routeTFromDistance(yards * 5);
+    if (t >= 0.98) continue;
     const point = pathPointAt(t);
     const tangent = pathTangentAt(t);
     const sideX = -tangent.y;
@@ -785,6 +872,13 @@ function makeYardageMarkers() {
       angle: tangent.angle,
     });
   }
+  const finishTangent = pathTangentAt(0.96);
+  yardageMarkers.push({
+    yards: totalYards,
+    x: target.x - finishTangent.x * 44,
+    y: target.y - finishTangent.y * 44,
+    angle: finishTangent.angle,
+  });
 }
 
 function makeDecorations() {
@@ -810,6 +904,15 @@ function makeDecorations() {
 
 function coursePathLength() {
   return distance(teePosition, doglegPoint) + distance(doglegPoint, target);
+}
+
+function routeTFromDistance(pixelsFromTee) {
+  const firstLeg = distance(teePosition, doglegPoint);
+  const secondLeg = distance(doglegPoint, target);
+  const total = firstLeg + secondLeg;
+  const routePixels = clamp(pixelsFromTee, 0, total);
+  if (routePixels <= firstLeg) return firstLeg ? (routePixels / firstLeg) * 0.5 : 0;
+  return 0.5 + (secondLeg ? ((routePixels - firstLeg) / secondLeg) * 0.5 : 0);
 }
 
 function calculatePar() {
@@ -867,13 +970,30 @@ function currentHazard() {
 
 function nearestRouteT(from = ball) {
   let best = { t: 0, d: Infinity };
-  for (let i = 0; i <= 100; i += 2) {
+  for (let i = 0; i <= 100; i += 1) {
     const t = i / 100;
     const point = pathPointAt(t);
     const d = Math.hypot(from.x - point.x, from.y - point.y);
     if (d < best.d) best = { t, d };
   }
   return best.t;
+}
+
+function routeDistanceRemaining(from = ball) {
+  if (!from || !Number.isFinite(from.x) || !target || !Number.isFinite(target.x)) return 0;
+  const progress = nearestRouteT(from);
+  const projected = pathPointAt(progress);
+  const firstLeg = distance(teePosition, doglegPoint);
+  const secondLeg = distance(doglegPoint, target);
+  const directToPin = distance(from, target);
+
+  if (directToPin < 170 || progress > 0.88) return directToPin;
+
+  const routeRemaining =
+    progress < 0.5
+      ? (1 - progress * 2) * firstLeg + secondLeg
+      : (1 - (progress - 0.5) * 2) * secondLeg;
+  return routeRemaining + distance(from, projected) * 0.35;
 }
 
 function routeAimTarget(from = ball) {
@@ -1026,6 +1146,38 @@ function maybeBlokeCourseComment() {
 }
 maybeBlokeCourseComment.last = 0;
 
+function queueFirstHoleRundown(bendLine) {
+  tutorialQueue = [bendLine, ...firstHoleRundownLines];
+  tutorialDelay = 1;
+}
+
+function updateTutorialQueue(dt) {
+  if (!tutorialQueue.length || roundOver || transitioning || aiming || ball.moving) return;
+  tutorialDelay -= dt;
+  if (tutorialDelay > 0 || messageTimer > 0) return;
+  const next = tutorialQueue.shift();
+  setMessage(next, 108, "course");
+  tutorialDelay = 22;
+}
+
+function markHelpfulResult(good = false) {
+  const player = players[activePlayerIndex];
+  if (!player) return;
+  if (good) player.frustrationStreak = Math.max(0, player.frustrationStreak - 1);
+}
+
+function struggleReminder(reason) {
+  const player = players[activePlayerIndex];
+  if (!player) return "";
+  player.frustrationStreak = (player.frustrationStreak || 0) + 1;
+  const enoughBad = player.frustrationStreak >= (hole === 1 ? 2 : 3);
+  const spaced = player.currentStrokes - (player.lastReminderStroke || -4) >= 2;
+  if (!enoughBad || !spaced) return "";
+  player.lastReminderStroke = player.currentStrokes;
+  const pool = struggleTipLines[reason] || mechanicTipLines;
+  return line(pool);
+}
+
 function swingAnchor() {
   const bounds = playableBounds();
   return {
@@ -1081,6 +1233,10 @@ function selectedClubSpec() {
   return clubs[selectedClubKeyForShot()] || clubs[selectedClub];
 }
 
+function yardsFromPixels(pixels) {
+  return Math.max(1, Math.round(pixels / 5));
+}
+
 function isWedgeKey(clubKey) {
   return clubKey === "wedge" || clubKey === "wedgeChip";
 }
@@ -1113,8 +1269,30 @@ function shotShapeFromVector(shot, maxShape = 0.22) {
 }
 
 function effectivePowerRatio(shot) {
-  const flickBonus = clamp(flickSpeed / 1.15, 0, 0.84);
-  return clamp(shot.ratio * (0.24 + flickBonus), 0, 1.12);
+  const shotClubKey = selectedClubKeyForShot();
+  const flick = clamp((flickSpeed - 0.18) / 1.62, 0, 1);
+  const profiles = {
+    driver: { base: 0.025, flick: 0.975, curve: 1.42 },
+    wedge: { base: 0.052, flick: 0.948, curve: 1.42 },
+    wedgeChip: { base: 0.42, flick: 0.58, curve: 0.9 },
+    putter: { base: 0.68, flick: 0.32, curve: 0.78 },
+  };
+  const profile = profiles[shotClubKey] || profiles.putter;
+  const flickCurve = Math.pow(flick, profile.curve);
+  return clamp(shot.ratio * (profile.base + flickCurve * profile.flick), 0, 1);
+}
+
+function recordAimPointer(nextPointer, now = performance.now()) {
+  const nextPull = Math.max(0, nextPointer.y - aimAnchor.y);
+  if (lastAimPoint) {
+    const dt = Math.max(10, now - lastAimPoint.time);
+    const pullChange = nextPull - lastAimPoint.pull;
+    if (pullChange > 0) flickSpeed = Math.max(flickSpeed, pullChange / dt);
+  }
+  pointer = nextPointer;
+  lastAimPoint = { x: pointer.x, y: pointer.y, pull: nextPull, time: now };
+  swingTrace.push({ x: pointer.x, y: pointer.y, life: 1 });
+  if (swingTrace.length > 42) swingTrace.shift();
 }
 
 function pointInSwingStart(point) {
@@ -1154,14 +1332,15 @@ function setMessage(text, ttl = 180, mood = "talk") {
     roast: { rate: 1.04, pitch: 1.2, volume: 0.88, pauseMs: 70 },
     good: { rate: 1.13, pitch: 1.36, volume: 0.98, pauseMs: 55 },
     ace: { rate: 1.18, pitch: 1.45, volume: 1, pauseMs: 45 },
-    course: { rate: 0.98, pitch: 1.12, volume: 0.82, pauseMs: 110 },
-    talk: { rate: 1, pitch: 1.14, volume: 0.84, pauseMs: 100 },
+    course: { rate: 0.98, pitch: 1.12, volume: 0.96, pauseMs: 110 },
+    talk: { rate: 1, pitch: 1.14, volume: 0.96, pauseMs: 100 },
   }[mood] || {};
   const now = performance.now();
   const shouldSpeak =
     mood === "ace" ||
-    (mood === "good" && now - lastSpokenLineAt > 14000 && Math.random() < 0.28) ||
-    (mood === "roast" && now - lastSpokenLineAt > 17000 && Math.random() < 0.24);
+    (mood === "good" && now - lastSpokenLineAt > 9500 && Math.random() < 0.42) ||
+    (mood === "roast" && now - lastSpokenLineAt > 11000 && Math.random() < 0.36) ||
+    (mood === "talk" && now - lastSpokenLineAt > 15000 && Math.random() < 0.18);
   if (shouldSpeak) {
     lastSpokenLineAt = now;
     speak(humanizeSpeech(text), { interrupt: false, ...speechStyle });
@@ -1239,7 +1418,7 @@ function awardPoints(amount, reason = "", mood = "good", speakIt = true) {
       text: `${reason} +${points}`,
       points,
       mood,
-      life: 260,
+      life: 520,
     });
     pointFeed = pointFeed.slice(0, 5);
   }
@@ -1277,6 +1456,83 @@ function clubChoiceBonus(shotClubKey, lie, hazard, distanceToCup, powerRatio) {
   return null;
 }
 
+function shotPowerMultiplierForLie(shotClubKey, powerRatio, distanceToCup, lie, hazard) {
+  if (hazard && hazard.type === "sand") {
+    if (isWedgeKey(shotClubKey)) {
+      if (shotClubKey === "wedgeChip") return 0.7 + clamp(powerRatio - 0.5, 0, 0.62) * 0.72;
+      return 0.72 + clamp(powerRatio - 0.62, 0, 0.5) * 0.74;
+    }
+    return shotClubKey === "driver" ? 1.02 : 0.55;
+  }
+  if (isWedgeKey(shotClubKey)) {
+    const insideApproach = distanceToCup < 350;
+    if (shotClubKey === "wedgeChip") return (insideApproach ? 0.95 : 0.78) + clamp(powerRatio - 0.46, 0, 0.68) * 0.58;
+    return (insideApproach ? 0.98 : 0.9) + clamp(powerRatio - 0.55, 0, 0.57) * 0.48;
+  }
+  if (shotClubKey === "putter") {
+    if (lie.onGreenPatch || lie.safe) return 1.02;
+    if (lie.inRough) return 0.18;
+    if (lie.inFringe) return 0.32;
+    return 0.52;
+  }
+  return 1;
+}
+
+function estimateShotYards(shotClubKey, powerRatio) {
+  const club = clubs[shotClubKey] || clubs.putter;
+  const lie = lieState(ball);
+  const hazard = currentHazard();
+  const distanceToCup = distance(ball, target);
+  let vx = club.power * clamp(powerRatio, 0, 1) * shotPowerMultiplierForLie(shotClubKey, powerRatio, distanceToCup, lie, hazard);
+  let z = club.loft ? 2 : 0;
+  let vz = club.loft ? (vx / club.power) * club.loft : 0;
+  let airborne = club.loft > 0;
+  let traveled = 0;
+  const sideMiss = lie.sideMiss;
+  const safeZone = lie.safe;
+  for (let i = 0; i < 900; i += 1) {
+    const speed = Math.abs(vx);
+    if (!airborne && speed < 0.11) break;
+    traveled += speed;
+    if (airborne) {
+      vz -= 1.28;
+      z += vz;
+      if (z <= 0) {
+        z = 0;
+        airborne = false;
+        const bouncePower = club.bounce * 0.9;
+        if (club.bounce > 0.1 && speed > 2.2) {
+          vx *= 0.88 + bouncePower * 0.12;
+          vz = speed * bouncePower * 0.82;
+          if (vz > 2.2) airborne = true;
+        }
+      }
+    }
+    const roughSlowdown = !safeZone && sideMiss > 0.08 ? 0.056 + sideMiss * 0.078 : 0;
+    const drag = safeZone ? 0.97 : Math.min(0.99, club.drag + 0.002 - roughSlowdown);
+    vx *= drag;
+    if (!airborne && speed < 0.62) vx *= 0.94;
+    if (sideMiss > 0.22 && !airborne && speed < 2.2) vx *= 0.68;
+  }
+  return yardsFromPixels(traveled);
+}
+
+function updateShotStats() {
+  if (!pinYardageEl || !avgYardageEl || !perfectYardageEl || !ball || !Number.isFinite(ball.x) || !target || !Number.isFinite(target.x)) return;
+  const shotClubKey = selectedClubKeyForShot();
+  if (shotStatsEl) {
+    shotStatsEl.classList.remove("club-putter", "club-wedge", "club-wedgeChip", "club-driver");
+    shotStatsEl.classList.add(`club-${shotClubKey}`);
+  }
+  const shotLabel = shotClubKey === "wedgeChip" ? "Flirt Chip" : clubs[shotClubKey]?.name || "Club";
+  const averageRatio = shotClubKey === "driver" ? 0.46 : shotClubKey === "wedge" ? 0.43 : shotClubKey === "wedgeChip" ? 0.42 : 0.38;
+  setText(pinYardageEl, `${yardsFromPixels(routeDistanceRemaining(ball))} yd`);
+  setText(avgYardageLabelEl, `${shotLabel} Avg`);
+  setText(avgYardageEl, `${estimateShotYards(shotClubKey, averageRatio)} yd`);
+  setText(perfectYardageLabelEl, `${shotLabel} Pure`);
+  setText(perfectYardageEl, `${estimateShotYards(shotClubKey, 1)} yd`);
+}
+
 function syncBallPickerVisibility() {
   if (playerTwoField) playerTwoField.style.display = selectedPlayerCount === 2 ? "grid" : "none";
   if (playerTwoBallField) playerTwoBallField.style.display = selectedPlayerCount === 2 ? "grid" : "none";
@@ -1288,6 +1544,7 @@ function syncClubUi(announce = false) {
   shotModeButtons.forEach((button) => button.classList.toggle("active", button.dataset.shot === wedgeShotMode));
   const label = selectedClub === "wedge" ? `${clubs.wedge.name} ${wedgeShotMode === "chip" ? "Chip" : "Flop"}` : clubs[selectedClub].name;
   setText(clubLabel, label);
+  updateShotStats();
   if (announce) {
     const extra = selectedClub === "wedge"
       ? wedgeShotMode === "chip"
@@ -1353,6 +1610,47 @@ function leaderboardKeyForCourse(courseIndex) {
   return `blokes-mini-golf-leaderboard-${courses[courseIndex].key}`;
 }
 
+function firebaseLeaderboardUrl(courseIndex = currentCourseIndex) {
+  return `${FIREBASE_LEADERBOARD_URL}/leaderboards/${courses[courseIndex].key}.json`;
+}
+
+function cleanLeaderboardEntry(entry) {
+  if (!entry || typeof entry !== "object") return null;
+  const total = Number(entry.total);
+  if (!Number.isFinite(total) || total <= 0) return null;
+  return {
+    name: cleanPlayerName(entry.name || "Mystery Bloke", "Mystery Bloke"),
+    total: Math.max(1, Math.round(total)),
+    points: Math.max(0, Math.round(Number(entry.points) || 0)),
+    date: entry.date || new Date(Number(entry.createdAt) || Date.now()).toLocaleDateString(),
+    createdAt: Number(entry.createdAt) || Date.now(),
+  };
+}
+
+function sortLeaderboard(board) {
+  return board
+    .map(cleanLeaderboardEntry)
+    .filter(Boolean)
+    .sort((a, b) => a.total - b.total || b.points - a.points || a.createdAt - b.createdAt)
+    .slice(0, 10);
+}
+
+function mergeLeaderboards(localBoard, cloudBoard) {
+  const seen = new Set();
+  return sortLeaderboard([...localBoard, ...cloudBoard].filter((entry) => {
+    const clean = cleanLeaderboardEntry(entry);
+    if (!clean) return false;
+    const key = `${clean.name.toLowerCase()}|${clean.total}|${clean.points}|${clean.date}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }));
+}
+
+function storeLeaderboard(courseIndex, board) {
+  localStorage.setItem(leaderboardKeyForCourse(courseIndex), JSON.stringify(sortLeaderboard(board)));
+}
+
 function getLeaderboard(courseIndex = currentCourseIndex) {
   try {
     return JSON.parse(localStorage.getItem(leaderboardKeyForCourse(courseIndex)) || "[]");
@@ -1361,15 +1659,54 @@ function getLeaderboard(courseIndex = currentCourseIndex) {
   }
 }
 
-function saveLeaderboardEntry(name, total, points = 0) {
-  const board = getLeaderboard();
-  board.push({ name, total, points, date: new Date().toLocaleDateString() });
-  board.sort((a, b) => a.total - b.total || (b.points || 0) - (a.points || 0));
-  localStorage.setItem(leaderboardKey(), JSON.stringify(board.slice(0, 5)));
-  renderLeaderboard();
+async function loadCloudLeaderboard(courseIndex = currentCourseIndex, rerender = true) {
+  if (!navigator.onLine || cloudLeaderboardRequests.has(courseIndex)) return;
+  cloudLeaderboardRequests.add(courseIndex);
+  try {
+    const response = await fetch(firebaseLeaderboardUrl(courseIndex), { cache: "no-store" });
+    if (!response.ok) throw new Error(`Firebase read failed ${response.status}`);
+    const data = await response.json();
+    const cloudBoard = Object.values(data || {}).map(cleanLeaderboardEntry).filter(Boolean);
+    storeLeaderboard(courseIndex, mergeLeaderboards(getLeaderboard(courseIndex), cloudBoard));
+    if (rerender && courseIndex === currentCourseIndex) renderLeaderboard(false);
+    if (rerender) renderMenuRecords(false);
+  } catch (error) {
+    console.warn("Cloud leaderboard unavailable", error);
+  } finally {
+    cloudLeaderboardRequests.delete(courseIndex);
+  }
 }
 
-function renderLeaderboard() {
+async function saveCloudLeaderboardEntry(entry, courseIndex = currentCourseIndex) {
+  if (!navigator.onLine) return;
+  try {
+    await fetch(firebaseLeaderboardUrl(courseIndex), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(entry),
+    });
+    loadCloudLeaderboard(courseIndex, true);
+  } catch (error) {
+    console.warn("Cloud leaderboard save failed", error);
+  }
+}
+
+function saveLeaderboardEntry(name, total, points = 0) {
+  const courseIndex = currentCourseIndex;
+  const entry = cleanLeaderboardEntry({
+    name,
+    total,
+    points,
+    date: new Date().toLocaleDateString(),
+    createdAt: Date.now(),
+  });
+  if (!entry) return;
+  storeLeaderboard(courseIndex, [...getLeaderboard(courseIndex), entry]);
+  renderLeaderboard(false);
+  saveCloudLeaderboardEntry(entry, courseIndex);
+}
+
+function renderLeaderboard(syncCloud = true) {
   setText(courseNameEl, courses[currentCourseIndex].name);
   if (!leaderboardList) return;
   const board = getLeaderboard();
@@ -1378,7 +1715,8 @@ function renderLeaderboard() {
     const item = document.createElement("li");
     setText(item, "No scores yet. Be the first problem.");
     leaderboardList.appendChild(item);
-    renderMenuRecords();
+    renderMenuRecords(false);
+    if (syncCloud) loadCloudLeaderboard(currentCourseIndex, true);
     return;
   }
   board.forEach((entry, index) => {
@@ -1386,10 +1724,11 @@ function renderLeaderboard() {
     setText(item, `${index + 1}. ${entry.name} ${entry.total} (${entry.points || 0}p)`);
     leaderboardList.appendChild(item);
   });
-  renderMenuRecords();
+  renderMenuRecords(false);
+  if (syncCloud) loadCloudLeaderboard(currentCourseIndex, true);
 }
 
-function renderMenuRecords() {
+function renderMenuRecords(syncCloud = true) {
   if (!menuRecords) return;
   menuRecords.innerHTML = "";
   courses.forEach((course, index) => {
@@ -1419,6 +1758,7 @@ function renderMenuRecords() {
     }
     card.append(heading, list);
     menuRecords.appendChild(card);
+    if (syncCloud) loadCloudLeaderboard(index, true);
   });
 }
 
@@ -1497,7 +1837,7 @@ function playNextSpeech() {
   const jitter = rnd(-0.035, 0.035);
   utterance.rate = options.rate || 0.98 + jitter;
   utterance.pitch = options.pitch || 1.22 + rnd(-0.04, 0.05);
-  utterance.volume = options.volume || 0.84;
+  utterance.volume = options.volume || 0.96;
   const preferredVoice = getAnnouncerVoice();
   if (preferredVoice) utterance.voice = preferredVoice;
   utterance.onend = () => window.setTimeout(playNextSpeech, options.pauseMs || 120);
@@ -1511,14 +1851,14 @@ function playNextSpeech() {
 function speakImpact(clubKey, powerRatio) {
   if (!soundEnabled) return;
   const now = performance.now();
-  if (now - lastSpokenLineAt < 12000 || Math.random() < 0.72) return;
+  if (now - lastSpokenLineAt < 8500 || Math.random() < 0.54) return;
   lastSpokenLineAt = now;
   const noise = line(mouthHits[clubKey] || mouthHits.wedge);
   const emphasis = powerRatio > 0.86 ? " Absolutely leathered." : powerRatio > 0.42 ? " Clean enough." : " Delicate little fella.";
   speak(`${noise}. ${emphasis}`, {
     rate: powerRatio > 0.86 ? 1.08 : 0.98,
     pitch: powerRatio > 0.86 ? 1.18 : 1.28,
-    volume: 0.88,
+    volume: 1,
     pauseMs: 70,
   });
 }
@@ -1550,7 +1890,7 @@ function playTone(frequency, start, duration, type = "sine", volume = 0.08, dest
   osc.type = type;
   osc.frequency.setValueAtTime(frequency, start);
   gain.gain.setValueAtTime(0.0001, start);
-  gain.gain.exponentialRampToValueAtTime(Math.min(volume, 0.12), start + 0.08);
+  gain.gain.exponentialRampToValueAtTime(Math.min(volume, 0.24), start + 0.05);
   gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
   osc.connect(gain);
   gain.connect(destination);
@@ -1575,7 +1915,7 @@ function playNoiseBurst(start, duration, volume = 0.08, destination = musicGain,
   filter.frequency.setValueAtTime(frequency, start);
   filter.Q.setValueAtTime(0.9, start);
   gain.gain.setValueAtTime(0.0001, start);
-  gain.gain.linearRampToValueAtTime(Math.min(volume, 0.16), start + 0.025);
+  gain.gain.linearRampToValueAtTime(Math.min(volume, 0.28), start + 0.018);
   gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
   source.buffer = buffer;
   source.connect(filter);
@@ -1595,7 +1935,7 @@ function playChoirTone(frequency, start, duration, volume = 0.05) {
   filter.frequency.setValueAtTime(frequency * 2.15, start);
   filter.Q.setValueAtTime(0.9, start);
   choirGain.gain.setValueAtTime(0.0001, start);
-  const safeVolume = Math.min(volume, 0.13);
+  const safeVolume = Math.min(volume, 0.24);
   choirGain.gain.linearRampToValueAtTime(safeVolume, start + 0.18);
   choirGain.gain.linearRampToValueAtTime(safeVolume * 0.72, start + duration * 0.7);
   choirGain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
@@ -1629,9 +1969,9 @@ function playAiMonkLoop() {
   melodyIndex += 1;
   melody.forEach((note, index) => {
     const start = now + index * 0.28;
-    playTone(note, start, 0.18, "triangle", 0.034, musicGain);
-    if (index % 2 === 0) playTone(note / 2, start, 0.22, "sine", 0.024, musicGain);
-    if (index === 3 || index === 7) playTone(note * 1.5, start + 0.045, 0.12, "square", 0.012, musicGain);
+    playTone(note, start, 0.2, "triangle", 0.092, musicGain);
+    if (index % 2 === 0) playTone(note / 2, start, 0.24, "sine", 0.062, musicGain);
+    if (index === 3 || index === 7) playTone(note * 1.5, start + 0.045, 0.14, "square", 0.034, musicGain);
   });
 }
 
@@ -1650,17 +1990,17 @@ function crowdReaction(kind = "clap") {
   const now = audio.currentTime + 0.02;
   if (kind === "boo") {
     [196, 174.61, 155.56].forEach((note, index) => {
-      playTone(note, now + index * 0.16, 0.42, "sawtooth", 0.055, musicGain);
-      playNoiseBurst(now + index * 0.16, 0.28, 0.045, musicGain, "lowpass", 520);
+      playTone(note, now + index * 0.16, 0.42, "sawtooth", 0.09, musicGain);
+      playNoiseBurst(now + index * 0.16, 0.28, 0.075, musicGain, "lowpass", 520);
     });
     return;
   }
   const claps = kind === "huge" ? 12 : 7;
   for (let i = 0; i < claps; i += 1) {
-    playNoiseBurst(now + i * 0.075 + rnd(0, 0.025), 0.055, kind === "huge" ? 0.12 : 0.085, musicGain, "bandpass", rnd(900, 1800));
+    playNoiseBurst(now + i * 0.075 + rnd(0, 0.025), 0.055, kind === "huge" ? 0.18 : 0.13, musicGain, "bandpass", rnd(900, 1800));
   }
   if (kind === "huge") {
-    [523.25, 659.25, 783.99].forEach((note, index) => playTone(note, now + 0.1 + index * 0.08, 0.28, "triangle", 0.05, musicGain));
+    [523.25, 659.25, 783.99].forEach((note, index) => playTone(note, now + 0.1 + index * 0.08, 0.28, "triangle", 0.08, musicGain));
   }
 }
 
@@ -1686,9 +2026,9 @@ function startMusic() {
   const audio = ensureAudioContext();
   if (!audio || musicTimer) return;
   musicMaster = audio.createGain();
-  musicMaster.gain.value = 0.72;
+  musicMaster.gain.value = 1;
   musicGain = audio.createGain();
-  musicGain.gain.value = 0.24;
+  musicGain.gain.value = 0.62;
   musicGain.connect(musicMaster);
   musicMaster.connect(audio.destination);
   scheduleMusicLoop();
@@ -1939,6 +2279,7 @@ function newHole(keepStreak = true) {
   trail = [];
   shotFlash = 0;
   holeGhostShot = null;
+  lastReleaseFeedback = null;
   aimHints = [];
   aimTarget = null;
   doglegPoint = {
@@ -1996,7 +2337,13 @@ function newHole(keepStreak = true) {
     : courseBend > 0
       ? "Dogleg left. Don't let the driver write checks your thumb can't cash."
       : "Straighter hole. The break is still very much a problem.";
-  setMessage(hole === 1 ? `${line(openers)} ${bendLine}` : `${bendLine} ${line(courseLines)}`, 220, "course");
+  tutorialQueue = [];
+  if (hole === 1) {
+    setMessage(line(openers), 92, "course");
+    queueFirstHoleRundown(bendLine);
+  } else {
+    setMessage(`${bendLine} ${line(courseLines)}`, 220, "course");
+  }
 }
 
 function resetBallForCurrentHole() {
@@ -2027,6 +2374,7 @@ function updateHud() {
   setText(streakEl, `x${streak}`);
   setText(bucksEl, `$${Math.floor(score / 10)}`);
   syncPlayerUi();
+  updateShotStats();
 }
 
 function canvasPoint(event) {
@@ -2067,6 +2415,7 @@ function beginAim(event) {
   lastAimPoint = { x: p.x, y: p.y, pull: Math.max(0, p.y - aimAnchor.y), time: aimStartedAt };
   swingTrace = [{ x: p.x, y: p.y, life: 1 }];
   swingTraceTimer = 0;
+  lastReleaseFeedback = null;
   flickSpeed = 0;
   setMusicEnergy("aim", 1200);
   setToastOnly("Pull straight down. Quick flick gets the sauce.", 90);
@@ -2078,32 +2427,20 @@ function beginAim(event) {
 
 function moveAim(event) {
   if (!aiming) return;
-  const nextPointer = canvasPoint(event);
-  const now = performance.now();
-  const nextPull = Math.max(0, nextPointer.y - aimAnchor.y);
-  if (lastAimPoint) {
-    const dt = Math.max(12, now - lastAimPoint.time);
-    const pullChange = nextPull - lastAimPoint.pull;
-    if (pullChange > 0) flickSpeed = Math.max(flickSpeed, pullChange / dt);
-  }
-  pointer = nextPointer;
-  lastAimPoint = { x: pointer.x, y: pointer.y, pull: nextPull, time: now };
-  swingTrace.push({ x: pointer.x, y: pointer.y, life: 1 });
-  if (swingTrace.length > 42) swingTrace.shift();
+  recordAimPointer(canvasPoint(event));
   updateAimHints();
   const shot = shotVector();
-  if (powerBar) powerBar.style.width = `${Math.round(effectivePowerRatio(shot) * 100)}%`;
+  if (powerBar) powerBar.style.width = `${Math.round(clamp(effectivePowerRatio(shot), 0, 1) * 100)}%`;
   event.preventDefault();
 }
 
 function endAim(event) {
   if (!aiming || !pointer) return;
-  if (event && event.clientX !== undefined) {
-    pointer = canvasPoint(event);
-    swingTrace.push({ x: pointer.x, y: pointer.y, life: 1 });
+  if (event && (event.clientX !== undefined || event.changedTouches?.length || event.touches?.length)) {
+    recordAimPointer(canvasPoint(event));
   }
   aiming = false;
-  swingTraceTimer = 190;
+  swingTraceTimer = 1;
   const shotClubKey = selectedClubKeyForShot();
   const club = clubs[shotClubKey];
   const shot = shotVector();
@@ -2117,16 +2454,14 @@ function endAim(event) {
   const distanceToCup = distance(ball, target);
   const driverNearGreen = selectedClub === "driver" && distanceToCup < 260;
   const swingMs = performance.now() - aimStartedAt;
-  const rushedBonus = swingMs < 900 ? 1.06 : swingMs > 1700 ? 0.92 : 1;
-  const timingSpray = selectedClub === "driver" && !driverNearGreen ? 0.005 : swingMs > 1350 ? 0.08 : swingMs < 260 ? 0.1 : 0.02;
-  const baseSpray = selectedClub === "driver" ? (driverNearGreen ? club.spray + 0.34 : 0.01) : club.spray;
-  const spray = baseSpray + timingSpray;
+  const timingSpray = driverNearGreen ? (swingMs > 1350 ? 0.08 : swingMs < 260 ? 0.1 : 0.02) : 0;
+  const spray = driverNearGreen ? club.spray + 0.32 + timingSpray : 0;
   const shotShape = shotShapeFromVector(shot, selectedClub === "driver" && !driverNearGreen ? 0.16 : 0.28);
   const driverWander = driverNearGreen ? rnd(-0.2, 0.2) : 0;
   const releaseAngle = shot.releaseSteer * (selectedClub === "putter" ? 0.16 : selectedClub === "driver" ? 0.2 : 0.18);
   const angle = shot.baseAngle + releaseAngle + shotShape * 0.05 + driverWander + rnd(-spray, spray);
-  const powerRatio = effectivePowerRatio(shot);
-  let power = powerRatio * club.power * rushedBonus;
+  const powerRatio = clamp(effectivePowerRatio(shot), 0, 1);
+  let power = powerRatio * club.power;
   const hazard = currentHazard();
   const lie = lieState(ball);
   let lieCurvePenalty = 0;
@@ -2170,9 +2505,16 @@ function endAim(event) {
     strokes = players[activePlayerIndex].currentStrokes;
     const grade = shotGradeInfo(shot, powerRatio, shotClubKey, distanceToCup);
     const choiceBonus = clubChoiceBonus(shotClubKey, lie, hazard, distanceToCup, powerRatio);
+    lastReleaseFeedback = {
+      powerRatio,
+      grade: grade.label,
+      edgeRatio: shot.edgeRatio,
+      clubKey: shotClubKey,
+    };
     const player = players[activePlayerIndex];
     if (player) {
       player.cleanStreak = shot.edgeRatio < 0.28 ? player.cleanStreak + 1 : 0;
+      if (grade.points >= 55 || choiceBonus) markHelpfulResult(true);
       if (!player.bestShot || grade.points > player.bestShot.points) player.bestShot = { label: grade.label, points: grade.points };
       if (!player.worstShot || grade.points < player.worstShot.points) player.worstShot = { label: grade.label, points: grade.points };
     }
@@ -2188,8 +2530,8 @@ function endAim(event) {
       safeAwarded: false,
       startX: ball.x,
       startY: ball.y,
-      projectedX: ball.x + Math.cos(shot.baseAngle) * clamp(powerRatio, 0.1, 1.1) * (shotClubKey === "driver" ? 340 : isWedgeKey(shotClubKey) ? 250 : 190),
-      projectedY: ball.y + Math.sin(shot.baseAngle) * clamp(powerRatio, 0.1, 1.1) * (shotClubKey === "driver" ? 340 : isWedgeKey(shotClubKey) ? 250 : 190),
+      projectedX: ball.x + Math.cos(shot.baseAngle) * estimateShotYards(shotClubKey, powerRatio) * 5,
+      projectedY: ball.y + Math.sin(shot.baseAngle) * estimateShotYards(shotClubKey, powerRatio) * 5,
     };
     holeGhostShot = { x1: ball.x, y1: ball.y, x2: ball.shotMeta.projectedX, y2: ball.shotMeta.projectedY, grade: grade.label, life: 1 };
     ball.moving = true;
@@ -2200,10 +2542,25 @@ function endAim(event) {
     if (choiceBonus) awardPoints(choiceBonus.points, choiceBonus.line, "good", false);
     if (player?.cleanStreak >= 3) awardPoints(40 + player.cleanStreak * 8, `Clean pull streak x${player.cleanStreak}. Stop being competent, it's unsettling`, "good", false);
     if (distanceToCup < 190) updateMusicProximity(true);
+    const badReason = hazard && hazard.type === "sand" && selectedClub !== "wedge"
+      ? "club"
+      : driverNearGreen
+        ? "club"
+        : grade.points <= 15
+          ? "pull"
+          : powerRatio < 0.28 && distanceToCup > 160
+            ? "weak"
+            : localBreakAt(ball).strength > 0.038 && shotClubKey !== "wedge"
+              ? "break"
+              : "";
+    const reminder = badReason ? struggleReminder(badReason) : "";
     if (hazard && hazard.type === "sand" && selectedClub !== "wedge") {
       // Message already set above.
+      if (reminder) setMessage(reminder, 190, "roast");
     } else if (choiceBonus && grade.points >= 55) {
       setMessage(`${grade.line} ${choiceBonus.line} +${grade.points + choiceBonus.points}`, 190, "good");
+    } else if (reminder) {
+      setMessage(`${grade.line} ${reminder}`, 190, "roast");
     } else if (driverNearGreen) {
       setMessage("Driver near the green. Bold. Stupid. Expensive. Leave runoff room or pay idiot tax.", 170, "roast");
     } else if (grade.points <= 15) {
@@ -2245,6 +2602,10 @@ function resetRound() {
   players[1].cleanStreak = 0;
   players[0].safeStreak = 0;
   players[1].safeStreak = 0;
+  players[0].frustrationStreak = 0;
+  players[1].frustrationStreak = 0;
+  players[0].lastReminderStroke = -4;
+  players[1].lastReminderStroke = -4;
   players[0].bestShot = null;
   players[1].bestShot = null;
   players[0].worstShot = null;
@@ -2255,8 +2616,11 @@ function resetRound() {
   trail = [];
   shotFlash = 0;
   holeGhostShot = null;
+  lastReleaseFeedback = null;
   aimHints = [];
   aimTarget = null;
+  tutorialQueue = [];
+  tutorialDelay = 0;
   newHole(false);
   renderLeaderboard();
 }
@@ -2320,7 +2684,9 @@ function recoverToSafeLie() {
   ball.shotMeta = null;
   trail = [];
   updateHud();
-  if (!passTurnAfterShot(line(roastLines))) setMessage(line(roastLines), 170, "roast");
+  const reminder = struggleReminder("club");
+  const message = reminder || line(roastLines);
+  if (!passTurnAfterShot(message)) setMessage(message, 170, "roast");
 }
 
 function recoverOutOfBounds(exitPoint = ball) {
@@ -2346,7 +2712,9 @@ function recoverOutOfBounds(exitPoint = ball) {
   ball.lastSafeZone = null;
   trail = [];
   updateHud();
-  if (!passTurnAfterShot(line(obRoasts))) setMessage(line(obRoasts), 170, "roast");
+  const reminder = struggleReminder("ob");
+  const message = reminder || line(obRoasts);
+  if (!passTurnAfterShot(message)) setMessage(message, 170, "roast");
 }
 
 function greenRunoffSave(previousPosition, speed) {
@@ -2460,7 +2828,17 @@ function updatePhysics(dt) {
   const sideMiss = fairwaySideMiss(ball);
   const localBreak = localBreakAt(ball);
   const safeDamping = safeZone ? 0.06 : 1.18;
-  const rollingInfluence = ball.airborne ? 0 : clamp(2.15 - speed / 7.8, 0.42, 1.55) * rough * safeDamping * club.check;
+  let greenCollarInfluence = 1;
+  if (localBreak.greenCollar) {
+    greenCollarInfluence = activeClubKey === "wedgeChip"
+      ? 1.42
+      : activeClubKey === "wedge"
+        ? 0.58
+        : activeClubKey === "driver"
+          ? 1.18
+          : 0.48;
+  }
+  const rollingInfluence = ball.airborne ? 0 : clamp(2.15 - speed / 7.8, 0.42, 1.55) * rough * safeDamping * club.check * greenCollarInfluence;
   ball.vx += localBreak.x * localBreak.strength * club.spin * rollingInfluence * dt;
   ball.vy += localBreak.y * localBreak.strength * club.spin * rollingInfluence * dt;
   if (sideMiss > 0 && !ball.airborne) {
@@ -2637,7 +3015,6 @@ function drawCourse() {
   safeDraw(drawBreakArrows);
   safeDraw(drawSafeZones);
   safeDraw(drawYardageMarkers);
-  safeDraw(drawBreakBadge);
 
   ctx.fillStyle = "rgba(255, 249, 233, 0.2)";
   ctx.beginPath();
@@ -2982,7 +3359,9 @@ function drawBreakZones() {
     ctx.save();
     ctx.translate(zone.x, zone.y);
     ctx.rotate(zone.angle);
-    ctx.fillStyle = meter > 0.62
+    ctx.fillStyle = zone.greenCollar
+      ? "rgba(202, 60, 36, 0.13)"
+      : meter > 0.62
       ? "rgba(202, 60, 36, 0.09)"
       : meter > 0.32
         ? "rgba(214, 158, 54, 0.08)"
@@ -2990,6 +3369,12 @@ function drawBreakZones() {
     ctx.beginPath();
     ctx.ellipse(0, 0, zone.rx, zone.ry, 0, 0, Math.PI * 2);
     ctx.fill();
+    if (zone.greenCollar) {
+      ctx.strokeStyle = "rgba(255, 188, 112, 0.26)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([12, 9]);
+      ctx.stroke();
+    }
     ctx.restore();
   }
 }
@@ -3050,35 +3435,58 @@ function drawPointFeed(dt) {
     ctx.fillStyle = item.mood === "roast" ? "#ffb19e" : item.mood === "talk" ? "#c9e8ff" : "#bff1a5";
     ctx.fillText(item.text.slice(0, 42), 30, y);
   });
+  drawNastyMeter(16 + width + 12, 16);
   ctx.restore();
 }
 
-function drawBreakBadge() {
-  const severity = breakSeverity();
-  const label = severity.label.toUpperCase();
-  const y = pointFeed.length ? 132 : 76;
-  ctx.save();
-  ctx.font = "800 14px Arial";
-  const width = ctx.measureText(label).width + 96;
-  roundRect(16, y, width, 38, 8);
-  ctx.fillStyle = "rgba(16, 38, 29, 0.72)";
+function drawNastyMeter(x, y) {
+  const width = 184;
+  const height = 76;
+  const power = lastReleaseFeedback ? clamp(lastReleaseFeedback.powerRatio, 0, 1) : 0;
+  const grade = lastReleaseFeedback?.grade || "No Shot";
+  const clubKey = lastReleaseFeedback?.clubKey || selectedClubKeyForShot();
+  const clubName = clubKey === "wedgeChip" ? "Chip" : clubs[clubKey]?.name || "Club";
+  const color = power > 0.78 ? "#ef6f4e" : power > 0.48 ? "#f2c14e" : "#74d38a";
+
+  roundRect(x, y, width, height, 10);
+  ctx.fillStyle = "rgba(13, 32, 24, 0.78)";
   ctx.fill();
-  ctx.strokeStyle = "rgba(255, 249, 233, 0.36)";
+  ctx.strokeStyle = "rgba(255, 249, 233, 0.35)";
+  ctx.lineWidth = 1.5;
   ctx.stroke();
+
   ctx.fillStyle = "#fff9e9";
-  ctx.fillText(label, 30, y + 24);
-  ctx.fillStyle = "rgba(255, 249, 233, 0.26)";
-  roundRect(width - 76, y + 14, 52, 8, 5);
+  ctx.font = "900 13px Arial";
+  ctx.fillText("NASTY METER", x + 14, y + 23);
+  ctx.fillStyle = "rgba(255, 249, 233, 0.76)";
+  ctx.font = "800 10px Arial";
+  ctx.fillText(`${clubName.toUpperCase()} RELEASE`, x + 14, y + 40);
+
+  ctx.fillStyle = "rgba(255, 249, 233, 0.18)";
+  roundRect(x + 14, y + 48, width - 28, 12, 7);
   ctx.fill();
-  ctx.fillStyle = severity.color;
-  roundRect(width - 76, y + 14, 52 * severity.meter, 8, 5);
-  ctx.restore();
+  ctx.fillStyle = color;
+  roundRect(x + 14, y + 48, (width - 28) * power, 12, 7);
+  ctx.fill();
+
+  ctx.fillStyle = color;
+  ctx.font = "900 13px Arial";
+  ctx.textAlign = "right";
+  ctx.fillText(`${Math.round(power * 100)}%`, x + width - 14, y + 23);
+  ctx.fillStyle = "rgba(255, 249, 233, 0.82)";
+  ctx.font = "800 10px Arial";
+  ctx.fillText(grade.toUpperCase(), x + width - 14, y + 40);
+  ctx.textAlign = "left";
 }
 
-function breakSeverity() {
-  const meter = clamp((greenBreak.strength - 0.010) / (0.026 - 0.010), 0, 1);
+function breakSeverity(point = null) {
+  const read = point && Number.isFinite(point.x)
+    ? localBreakAt(point)
+    : { strength: greenBreak.strength, safe: false };
+  const meter = read.safe ? 0 : clamp((read.strength - 0.006) / (0.052 - 0.006), 0, 1);
   if (meter > 0.68) return { label: "nasty", meter, color: "#a4422d" };
   if (meter > 0.34) return { label: "spicy", meter, color: "#b88a37" };
+  if (read.safe) return { label: "safe", meter, color: "#52be58" };
   return { label: "gentle", meter, color: "#52be58" };
 }
 
@@ -3440,7 +3848,6 @@ function drawSwingTrace(dt) {
   const trigger = swingAnchor();
   const active = aiming;
   ctx.save();
-  if (!active) ctx.globalAlpha = Math.max(0, Math.min(1, swingTraceTimer / 190));
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   ctx.strokeStyle = active ? "rgba(255, 249, 233, 0.82)" : "rgba(255, 230, 156, 0.72)";
@@ -3482,13 +3889,6 @@ function drawSwingTrace(dt) {
     ctx.fillText(verdict, x + 9, y + 13);
   }
 
-  if (!active) {
-    swingTraceTimer -= dt;
-    swingTrace.forEach((point) => {
-      point.life = Math.max(0, Math.min(1, swingTraceTimer / 190));
-    });
-    if (swingTraceTimer <= 0) swingTrace = [];
-  }
   ctx.restore();
 }
 
@@ -3570,10 +3970,9 @@ function drawAim() {
 
   ctx.save();
   if (activeShot && shot) {
-    const powerRatio = effectivePowerRatio(shot);
-    const visiblePower = clamp(powerRatio, 0.04, 1.08);
-    const baseLength = selectedClub === "putter" ? 210 : selectedClub === "wedge" ? (wedgeShotMode === "chip" ? 225 : 265) : 340;
-    const powerLength = baseLength * visiblePower;
+    const powerRatio = clamp(effectivePowerRatio(shot), 0, 1);
+    const shotClubKey = selectedClubKeyForShot();
+    const powerLength = estimateShotYards(shotClubKey, Math.max(powerRatio, 0.04)) * 5;
     const dx = Math.cos(shot.baseAngle);
     const dy = Math.sin(shot.baseAngle);
     const end = {
@@ -3611,7 +4010,7 @@ function drawAim() {
     ctx.lineWidth = 4;
     const labelX = ball.x + dx * (powerLength + 22);
     const labelY = ball.y + dy * (powerLength + 22);
-    const label = `${Math.round(clamp(powerRatio, 0, 1.12) * 100)}%`;
+    const label = `${Math.round(powerRatio * 100)}%`;
     ctx.strokeText(label, labelX, labelY);
     ctx.fillText(label, labelX, labelY);
   } else {
@@ -3690,6 +4089,7 @@ function loop(now) {
   lastTime = now;
   updateMusicProximity();
   updatePhysics(dt);
+  updateTutorialQueue(dt);
   maybeBlokeCourseComment();
   render(dt);
   if (messageTimer > 0) messageTimer -= dt;
@@ -3721,6 +4121,11 @@ menuTabs.forEach((button) => {
 });
 
 const restartButton = document.getElementById("restart");
+if (introEnter) introEnter.addEventListener("click", () => {
+  wakeSound();
+  if (introGate) introGate.classList.add("hidden");
+  setToastOnly("Welcome to Blokes Mini Golf.", 100);
+});
 if (restartButton) restartButton.addEventListener("click", () => {
   wakeSound();
   roundOver = true;

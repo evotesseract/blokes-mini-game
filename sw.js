@@ -1,11 +1,12 @@
-const CACHE_NAME = "blokes-mini-golf-v48";
+const CACHE_NAME = "blokes-mini-golf-v67";
 const ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
   "./game.js",
   "./manifest.webmanifest",
-  "./icon.svg"
+  "./icon.svg",
+  "./assets/blokes-logo.png"
 ];
 
 self.addEventListener("install", (event) => {
@@ -24,6 +25,8 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+  const requestUrl = new URL(event.request.url);
+  if (requestUrl.origin !== self.location.origin) return;
   event.respondWith(
     caches.match(event.request).then((cached) => {
       const network = fetch(event.request)
