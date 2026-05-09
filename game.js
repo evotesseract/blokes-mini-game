@@ -4646,6 +4646,12 @@ if (courseSelect) courseSelect.addEventListener("change", () => {
 window.addEventListener("online", updateOfflineStatus);
 window.addEventListener("offline", updateOfflineStatus);
 window.addEventListener("resize", updateCompactEmbedMode);
+if (embedLaunchOverlay && embedOpenGame) {
+  embedLaunchOverlay.addEventListener("click", (event) => {
+    if (event.target.closest("a")) return;
+    embedOpenGame.click();
+  });
+}
 if (soundToggle) soundToggle.addEventListener("click", toggleSound);
 if (fullscreenToggle) fullscreenToggle.addEventListener("click", toggleFullscreen);
 document.addEventListener("fullscreenchange", updateFullscreenButton);
