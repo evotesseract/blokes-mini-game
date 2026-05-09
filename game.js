@@ -22,6 +22,8 @@ const ballSwatches = document.querySelectorAll(".ball-swatch");
 const offlineStatus = document.getElementById("offline-status");
 const introGate = document.getElementById("intro-gate");
 const introEnter = document.getElementById("intro-enter");
+const embedLaunchOverlay = document.getElementById("embed-launch-overlay");
+const embedOpenGame = document.getElementById("embed-open-game");
 const scoreEl = document.getElementById("score");
 const bestEl = document.getElementById("best");
 const holeEl = document.getElementById("hole");
@@ -4569,9 +4571,7 @@ menuTabs.forEach((button) => {
 
 const restartButton = document.getElementById("restart");
 if (introEnter) introEnter.addEventListener("click", () => {
-  if (isMobileViewport()) {
-    enterFullscreenOrExpand("Phone browser blocked true fullscreen, so this is the backup view.");
-  }
+  enterFullscreenOrExpand("Fullscreen blocked, so we stretched the game to fill the screen.");
   if (introGate) introGate.classList.add("hidden");
   mainMenuAudioReady = true;
   wakeSound();
