@@ -59,8 +59,26 @@ const soundLabel = document.getElementById("sound-label");
 const fullscreenToggle = document.getElementById("fullscreen-toggle");
 const gameCard = document.querySelector(".game-card");
 
-const W = canvas.width;
-const H = canvas.height;
+const W = 960;
+const H = 620;
+let canvasScale = 1;
+
+function configureCanvasResolution() {
+  const nextScale = Math.min(2.5, Math.max(1, window.devicePixelRatio || 1));
+  const nextWidth = Math.round(W * nextScale);
+  const nextHeight = Math.round(H * nextScale);
+  if (canvas.width !== nextWidth || canvas.height !== nextHeight || canvasScale !== nextScale) {
+    canvas.width = nextWidth;
+    canvas.height = nextHeight;
+    canvasScale = nextScale;
+  }
+  canvas.style.aspectRatio = `${W} / ${H}`;
+  ctx.setTransform(canvasScale, 0, 0, canvasScale, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+}
+
+configureCanvasResolution();
 
 const clubs = {
   putter: { name: "Tiny Tapper", power: 7.8, drag: 0.982, loft: 0, spin: 0.2, bounce: 0.05, aim: 115, spray: 0, check: 1 },
@@ -536,6 +554,7 @@ let musicTempo = 1;
 let musicEnergy = 0.7;
 let lastMusicPulse = 0;
 let lastMusicUpdate = 0;
+let mainMenuAudioReady = false;
 let musicPadGain = null;
 let musicPadNodes = [];
 let musicNodes = [];
@@ -1918,7 +1937,7 @@ function roundSummary(player) {
 }
 
 function speak(text, options = {}) {
-  if (!soundEnabled || !("speechSynthesis" in window)) return;
+  if (!canPlayGameAudio() || !("speechSynthesis" in window)) return;
   const cleanedText = humanizeSpeech(text);
   if (!cleanedText) return;
 
@@ -1952,7 +1971,7 @@ function getAnnouncerVoice() {
 }
 
 function playNextSpeech() {
-  if (!soundEnabled || !speechQueue.length || !("speechSynthesis" in window)) {
+  if (!canPlayGameAudio() || !speechQueue.length || !("speechSynthesis" in window)) {
     speaking = false;
     return;
   }
@@ -1974,7 +1993,7 @@ function playNextSpeech() {
 }
 
 function speakImpact(clubKey, powerRatio) {
-  if (!soundEnabled) return;
+  if (!canPlayGameAudio()) return;
   const now = performance.now();
   if (now - lastSpokenLineAt < 8500 || Math.random() < 0.54) return;
   lastSpokenLineAt = now;
@@ -2080,7 +2099,7 @@ function playChoirTone(frequency, start, duration, volume = 0.05) {
 }
 
 function playAiMonkLoop() {
-  if (!soundEnabled || !musicGain) return;
+  if (!canPlayGameAudio() || !musicGain) return;
   const audio = ensureAudioContext();
   if (!audio) return;
   const now = audio.currentTime + 0.03;
@@ -2109,7 +2128,7 @@ function chantBlokesMiniGolf() {
 }
 
 function crowdReaction(kind = "clap") {
-  if (!soundEnabled) return;
+  if (!canPlayGameAudio()) return;
   const audio = ensureAudioContext();
   if (!audio || !musicGain) return;
   const now = audio.currentTime + 0.02;
@@ -2142,12 +2161,13 @@ function updateMusicProximity(force = false) {
 }
 
 function scheduleMusicLoop() {
-  if (!soundEnabled || !musicGain) return;
+  if (!canPlayGameAudio() || !musicGain) return;
   playAiMonkLoop();
   musicTimer = window.setTimeout(scheduleMusicLoop, 2450);
 }
 
 function startMusic() {
+  if (!canPlayGameAudio()) return;
   const audio = ensureAudioContext();
   if (!audio || musicTimer) return;
   musicMaster = audio.createGain();
@@ -2207,16 +2227,23 @@ function toggleSound() {
 }
 
 function wakeSound() {
-  if (soundEnabled && !musicTimer) startMusic();
+  if (canPlayGameAudio() && !musicTimer) startMusic();
+}
+
+function isEmbeddedFrame() {
+  try {
+    return window.self !== window.top;
+  } catch (error) {
+    return true;
+  }
+}
+
+function canPlayGameAudio() {
+  return soundEnabled && mainMenuAudioReady && !isEmbeddedFrame();
 }
 
 function updateCompactEmbedMode() {
-  let embedded = false;
-  try {
-    embedded = window.self !== window.top;
-  } catch (error) {
-    embedded = true;
-  }
+  const embedded = isEmbeddedFrame();
   const cramped = window.innerWidth < 760 || window.innerHeight < 720;
   document.body.classList.toggle("compact-embed", embedded && cramped);
 }
@@ -2237,11 +2264,16 @@ function isMobileViewport() {
   return window.matchMedia("(max-width: 760px), (pointer: coarse)").matches;
 }
 
-function requestFullscreen(element) {
-  if (element.requestFullscreen) return element.requestFullscreen();
+function requestFullscreen(element = gameCard) {
+  if (!element) return Promise.reject(new Error("Fullscreen is not available here."));
+  if (element.requestFullscreen) return element.requestFullscreen({ navigationUI: "hide" });
   if (element.webkitRequestFullscreen) return element.webkitRequestFullscreen();
   if (element.msRequestFullscreen) return element.msRequestFullscreen();
   return Promise.reject(new Error("Fullscreen is not available here."));
+}
+
+function requestBestFullscreen() {
+  return requestFullscreen(gameCard).catch(() => requestFullscreen(document.documentElement));
 }
 
 function exitFullscreen() {
@@ -2267,7 +2299,7 @@ function enterFullscreenOrExpand(message = "Fullscreen blocked, so we stretched 
     return Promise.resolve(true);
   }
   if (options.forceExpand) return Promise.resolve(expandInPage(message));
-  return requestFullscreen(gameCard)
+  return requestBestFullscreen()
     .then(() => {
       updateFullscreenButton();
       return true;
@@ -2363,12 +2395,42 @@ function rectsOverlap(a, b, padding = 20) {
   );
 }
 
+function pointInHazardShape(hazard, x, y, padding = 0) {
+  const cx = hazard.x + hazard.w / 2;
+  const cy = hazard.y + hazard.h / 2;
+  const rx = hazard.w * 0.56 + padding;
+  const ry = hazard.h * 0.6 + padding;
+  return ((x - cx) * (x - cx)) / (rx * rx) + ((y - cy) * (y - cy)) / (ry * ry) <= 1;
+}
+
+function decorationOverlapsHazard(item, hazard, padding = 24) {
+  if (!item || item.type !== "gum" || !hazard) return false;
+  const s = item.s || 1;
+  const treePoints = [
+    { x: item.x, y: item.y + 12 * s, r: 13 * s },
+    { x: item.x, y: item.y - 20 * s, r: 24 * s },
+    { x: item.x - 15 * s, y: item.y - 6 * s, r: 18 * s },
+    { x: item.x + 14 * s, y: item.y - 6 * s, r: 20 * s },
+    { x: item.x + 2 * s, y: item.y + 4 * s, r: 17 * s },
+  ];
+  return treePoints.some((point) => pointInHazardShape(hazard, point.x, point.y, padding + point.r));
+}
+
+function hazardOverlapsDecoration(hazard, padding = 24) {
+  return decorations.some((item) => decorationOverlapsHazard(item, hazard, padding));
+}
+
+function removeDecorationsOverHazards() {
+  decorations = decorations.filter((item) => !hazards.some((hazard) => decorationOverlapsHazard(item, hazard, 18)));
+}
+
 function addHazard(t, sideOffset, type, width, height) {
   let candidate = createHazard(t, sideOffset, type, width, height);
   for (let attempt = 0; attempt < 42; attempt += 1) {
     const clean =
       !hazardOverlapsSafeZone(candidate) &&
       !hazardOverlapsGreen(candidate) &&
+      !hazardOverlapsDecoration(candidate) &&
       !hazards.some((hazard) => rectsOverlap(hazard, candidate));
     if (clean) {
       hazards.push(candidate);
@@ -2385,7 +2447,12 @@ function addHazard(t, sideOffset, type, width, height) {
   }
   const routeSide = sideOffset < 0 ? -1 : 1;
   candidate = createHazard(clamp(t, 0.14, 0.9), routeSide * 175, type, width, height);
-  if (!hazardOverlapsSafeZone(candidate) && !hazardOverlapsGreen(candidate) && !hazards.some((hazard) => rectsOverlap(hazard, candidate, 10))) {
+  if (
+    !hazardOverlapsSafeZone(candidate) &&
+    !hazardOverlapsGreen(candidate) &&
+    !hazardOverlapsDecoration(candidate, 14) &&
+    !hazards.some((hazard) => rectsOverlap(hazard, candidate, 10))
+  ) {
     hazards.push(candidate);
   }
   return candidate;
@@ -2426,7 +2493,7 @@ function addGreenCarryWater() {
     };
     const cupClear = Math.hypot(candidate.x + candidate.w / 2 - target.x, candidate.y + candidate.h / 2 - target.y) > target.r * 3.0;
     const trueLineClear = !trueLineZone || !inEllipseZone(trueLineZone, candidate.x + candidate.w / 2, candidate.y + candidate.h / 2);
-    if (cupClear && trueLineClear && !hazards.some((hazard) => rectsOverlap(hazard, candidate, 8))) {
+    if (cupClear && trueLineClear && !hazardOverlapsDecoration(candidate, 12) && !hazards.some((hazard) => rectsOverlap(hazard, candidate, 8))) {
       hazards.push(candidate);
     }
   });
@@ -2493,6 +2560,7 @@ function newHole(keepStreak = true) {
     const sideOffset = i % 3 === 0 ? side * rnd(72, 126) : side * rnd(122, 188);
     addHazard(t, sideOffset, i % 3 === 1 ? "water" : "sand");
   }
+  removeDecorationsOverHazards();
 
   const bumperCount = clamp(Math.floor((hole - 6) / 4), 0, 1);
   for (let i = 0; i < bumperCount; i++) {
@@ -2869,6 +2937,53 @@ function recoverToSafeLie() {
   if (!passTurnAfterShot(message)) setMessage(message, 170, "roast");
 }
 
+function waterDropPoint(waterPoint = ball) {
+  const bounds = playableBounds();
+  const start = { x: waterPoint.x, y: waterPoint.y };
+  const dx = teePosition.x - start.x;
+  const dy = teePosition.y - start.y;
+  for (let i = 1; i <= 96; i += 1) {
+    const t = i / 96;
+    const point = {
+      x: clamp(start.x + dx * t, bounds.left + ball.r + 4, bounds.right - ball.r - 4),
+      y: clamp(start.y + dy * t, bounds.top + ball.r + 4, bounds.bottom - ball.r - 4),
+      r: ball.r,
+    };
+    const onFairway = fairwaySideMiss(point) <= 0.015;
+    const clearHazards = !hazards.some((hazard) => hazardContainsBall(hazard, point));
+    if (onFairway && clearHazards) return point;
+  }
+  const routePoint = pathPointAt(nearestRouteT(start));
+  return {
+    x: clamp(routePoint.x, bounds.left + ball.r + 4, bounds.right - ball.r - 4),
+    y: clamp(routePoint.y, bounds.top + ball.r + 4, bounds.bottom - ball.r - 4),
+    r: ball.r,
+  };
+}
+
+function recoverFromWater(waterPoint = ball) {
+  const drop = waterDropPoint(waterPoint);
+  players[activePlayerIndex].currentStrokes += 1;
+  players[activePlayerIndex].safeStreak = 0;
+  players[activePlayerIndex].cleanStreak = 0;
+  strokes = players[activePlayerIndex].currentStrokes;
+  ball.x = drop.x;
+  ball.y = drop.y;
+  ball.vx = 0;
+  ball.vy = 0;
+  ball.z = 0;
+  ball.vz = 0;
+  ball.airborne = false;
+  ball.moving = false;
+  ball.curveSpin = 0;
+  ball.shotMeta = null;
+  trail = [];
+  updateHud();
+  const reminder = struggleReminder("club");
+  const message = reminder || "Splash tax. Dropped back on the fairway line toward the WACKIN BOX.";
+  if (!passTurnAfterShot(message)) setMessage(message, 170, "roast");
+}
+
 function recoverOutOfBounds(exitPoint = ball) {
   const bounds = playableBounds();
   const drop = {
@@ -3158,7 +3273,7 @@ function updatePhysics(dt) {
       ball.vx *= Math.pow(slow, dt);
       ball.vy *= Math.pow(slow, dt);
       if (hazard.type === "water" && !ball.airborne && speed < 4.2) {
-        recoverToSafeLie();
+        recoverFromWater({ x: ball.x, y: ball.y, r: ball.r });
         return;
       }
     }
@@ -4378,6 +4493,7 @@ function drawConfetti(dt) {
 }
 
 function render(dt) {
+  configureCanvasResolution();
   ctx.clearRect(0, 0, W, H);
   safeDraw(drawCourse);
   safeDraw(() => drawPointFeed(dt));
@@ -4453,20 +4569,23 @@ menuTabs.forEach((button) => {
 
 const restartButton = document.getElementById("restart");
 if (introEnter) introEnter.addEventListener("click", () => {
-  wakeSound();
   if (isMobileViewport()) {
-    enterFullscreenOrExpand("Phone mode engaged. If the browser blocks true fullscreen, this stretched view is the backup.");
+    enterFullscreenOrExpand("Phone browser blocked true fullscreen, so this is the backup view.");
   }
   if (introGate) introGate.classList.add("hidden");
+  mainMenuAudioReady = true;
+  wakeSound();
   setToastOnly("Welcome to Blokes Mini Golf.", 100);
 });
 if (restartButton) restartButton.addEventListener("click", () => {
+  mainMenuAudioReady = true;
   wakeSound();
   roundOver = true;
   if (startMenu) startMenu.classList.remove("hidden");
   setMessage("New round menu. Choose your next mistake.");
 });
 if (startMatchButton) startMatchButton.addEventListener("click", () => {
+  mainMenuAudioReady = true;
   wakeSound();
   startTwoPlayerMatch();
 });
