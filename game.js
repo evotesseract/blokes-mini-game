@@ -2271,8 +2271,7 @@ function canPlayGameAudio() {
 
 function updateCompactEmbedMode() {
   const embedded = isEmbeddedFrame();
-  const cramped = window.innerWidth < 760 || window.innerHeight < 720;
-  document.body.classList.toggle("compact-embed", embedded && cramped);
+  document.body.classList.toggle("compact-embed", embedded);
 }
 
 function isFullscreen() {

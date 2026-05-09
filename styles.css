@@ -153,6 +153,52 @@ body.compact-embed .start-menu {
   display: none;
 }
 
+body.compact-embed .shell {
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  display: block;
+}
+
+body.compact-embed .game-card {
+  width: 100%;
+  height: clamp(280px, 68vw, 430px);
+  min-height: 0;
+  border: 0;
+  box-shadow: none;
+}
+
+body.compact-embed .topbar,
+body.compact-embed .hud,
+body.compact-embed .matchbar,
+body.compact-embed .course-wrap,
+body.compact-embed .controls,
+body.compact-embed .leaderboard,
+body.compact-embed .toast,
+body.compact-embed .bloke-popup {
+  display: none;
+}
+
+body.compact-embed .embed-launch-panel {
+  width: min(520px, calc(100% - 24px));
+  padding: 18px 14px;
+  background: rgba(0, 0, 0, 0.86);
+}
+
+body.compact-embed .embed-logo {
+  width: min(220px, 72%);
+  max-height: 124px;
+}
+
+body.compact-embed .embed-launch-panel h2 {
+  font-size: clamp(1.6rem, 8vw, 2.6rem);
+}
+
+body.compact-embed .embed-launch-panel a {
+  min-height: 54px;
+  min-width: min(300px, 100%);
+}
+
 .start-menu {
   position: absolute;
   inset: 0;
