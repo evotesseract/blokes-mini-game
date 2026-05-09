@@ -39,6 +39,8 @@ const courseSelect = document.getElementById("course-select");
 const courseNameEl = document.getElementById("course-name");
 const leaderboardList = document.getElementById("leaderboard-list");
 const startMatchButton = document.getElementById("start-match");
+const leaderboardShortcut = document.getElementById("leaderboard-shortcut");
+const leaderboardStatus = document.getElementById("leaderboard-status");
 const playerOneCard = document.getElementById("player-one-card");
 const playerTwoCard = document.getElementById("player-two-card");
 const streakEl = document.getElementById("streak");
@@ -1805,8 +1807,18 @@ function getLeaderboard(courseIndex = currentCourseIndex) {
   }
 }
 
+function setLeaderboardStatus(text, state = "neutral") {
+  if (!leaderboardStatus) return;
+  setText(leaderboardStatus, text);
+  leaderboardStatus.className = `leaderboard-status ${state}`;
+}
+
 async function loadCloudLeaderboard(courseIndex = currentCourseIndex, rerender = true) {
-  if (!navigator.onLine || cloudLeaderboardRequests.has(courseIndex)) return;
+  if (!navigator.onLine) {
+    setLeaderboardStatus("Offline: records saved on this device only.", "warn");
+    return;
+  }
+  if (cloudLeaderboardRequests.has(courseIndex)) return;
   cloudLeaderboardRequests.add(courseIndex);
   try {
     const response = await fetch(firebaseLeaderboardUrl(courseIndex), { cache: "no-store" });
@@ -1814,26 +1826,38 @@ async function loadCloudLeaderboard(courseIndex = currentCourseIndex, rerender =
     const data = await response.json();
     const cloudBoard = Object.values(data || {}).map(cleanLeaderboardEntry).filter(Boolean);
     storeLeaderboard(courseIndex, mergeLeaderboards(getLeaderboard(courseIndex), cloudBoard));
+    setLeaderboardStatus("Cloud leaderboard connected.", "good");
     if (rerender && courseIndex === currentCourseIndex) renderLeaderboard(false);
     if (rerender) renderMenuRecords(false);
   } catch (error) {
     console.warn("Cloud leaderboard unavailable", error);
+    setLeaderboardStatus("Cloud leaderboard blocked. Local scores still save on this device.", "bad");
   } finally {
     cloudLeaderboardRequests.delete(courseIndex);
   }
 }
 
 async function saveCloudLeaderboardEntry(entry, courseIndex = currentCourseIndex) {
-  if (!navigator.onLine) return;
+  if (!navigator.onLine) {
+    setLeaderboardStatus("Saved locally only. No internet for cloud save.", "warn");
+    return;
+  }
   try {
-    await fetch(firebaseLeaderboardUrl(courseIndex), {
+    const response = await fetch(firebaseLeaderboardUrl(courseIndex), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(entry),
     });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      throw new Error(`Firebase write failed ${response.status} ${detail}`);
+    }
+    setLeaderboardStatus("Score saved to cloud leaderboard.", "good");
     loadCloudLeaderboard(courseIndex, true);
   } catch (error) {
     console.warn("Cloud leaderboard save failed", error);
+    setLeaderboardStatus("Saved locally only. Firebase write is blocked.", "bad");
+    setMessage("Leaderboard saved on this device, but cloud save is blocked. Firebase rules need write access.", 220, "roast");
   }
 }
 
@@ -1848,6 +1872,7 @@ function saveLeaderboardEntry(name, total, points = 0) {
   });
   if (!entry) return;
   storeLeaderboard(courseIndex, [...getLeaderboard(courseIndex), entry]);
+  setLeaderboardStatus("Saved locally. Syncing cloud leaderboard...", "warn");
   renderLeaderboard(false);
   saveCloudLeaderboardEntry(entry, courseIndex);
 }
@@ -4589,6 +4614,11 @@ if (startMatchButton) startMatchButton.addEventListener("click", () => {
   wakeSound();
   startTwoPlayerMatch();
 });
+if (leaderboardShortcut) leaderboardShortcut.addEventListener("click", () => {
+  mainMenuAudioReady = true;
+  wakeSound();
+  showMenuTab("records");
+});
 modeButtons.forEach((button) => {
   button.addEventListener("click", () => {
     selectedPlayerCount = Number(button.dataset.mode);
@@ -4653,4 +4683,5 @@ updateSoundButton();
 updateOfflineStatus();
 updateCompactEmbedMode();
 renderLeaderboard();
+if (window.location.hash === "#records") showMenuTab("records");
 requestAnimationFrame(loop);

@@ -127,6 +127,15 @@ button {
   text-transform: uppercase;
 }
 
+.embed-launch-panel .embed-records-link {
+  min-height: 42px;
+  margin-top: 9px;
+  background: #111;
+  border-color: rgba(215, 184, 95, 0.52);
+  color: #f8e3ad;
+  font-size: 0.9rem;
+}
+
 .embed-launch-panel span {
   display: block;
   margin-top: 10px;
@@ -277,7 +286,8 @@ body.compact-embed .start-menu {
 }
 
 .mode-button,
-.start-button {
+.start-button,
+.secondary-menu-button {
   height: 42px;
   border: 1px solid rgba(24, 32, 22, 0.32);
   background: #fffaf0;
@@ -290,6 +300,14 @@ body.compact-embed .start-menu {
 .start-button {
   background: var(--deep);
   color: var(--cream);
+}
+
+.secondary-menu-button {
+  width: 100%;
+  margin-top: 8px;
+  background: rgba(255, 250, 240, 0.62);
+  color: var(--ink);
+  text-transform: uppercase;
 }
 
 .menu-fields {
@@ -363,6 +381,31 @@ body.compact-embed .start-menu {
   max-height: min(44vh, 360px);
   overflow: auto;
   padding-right: 2px;
+}
+
+.leaderboard-status {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid rgba(24, 32, 22, 0.22);
+  background: rgba(255, 255, 255, 0.34);
+  color: var(--deep);
+  font: 900 0.75rem Arial, sans-serif;
+  text-transform: uppercase;
+}
+
+.leaderboard-status.good {
+  border-color: rgba(31, 109, 58, 0.45);
+  color: #1f6d3a;
+}
+
+.leaderboard-status.warn {
+  border-color: rgba(184, 138, 55, 0.52);
+  color: #7b5b1f;
+}
+
+.leaderboard-status.bad {
+  border-color: rgba(164, 66, 45, 0.5);
+  color: #a4422d;
 }
 
 .tutorial-grid {
@@ -2276,6 +2319,7 @@ body {
 .mode-button.active,
 .start-button,
 #start-match,
+.secondary-menu-button,
 .open-full-game {
   background: #111;
   color: var(--cream);
@@ -2295,6 +2339,7 @@ body {
 .quick-rules,
 .desktop-note,
 .offline-status,
+.leaderboard-status,
 .ball-picker,
 .record-card {
   border-color: rgba(255, 247, 223, 0.16);
@@ -2303,6 +2348,7 @@ body {
 
 .menu-tab,
 .mode-button,
+.secondary-menu-button,
 .menu-fields input,
 .menu-fields select,
 #restart,
