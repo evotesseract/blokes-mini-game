@@ -1,4 +1,4 @@
-const CACHE_NAME = "blokes-mini-golf-v91";
+const CACHE_NAME = "blokes-mini-golf-v92";
 const ASSETS = [
   "./",
   "./index.html",
